@@ -20,18 +20,19 @@ data class BatterySnapshot(
     val voltageMv: Int?,
     val temperatureDeciC: Int?,
     val technology: String?,
-    val present: Boolean?,
-    val cycleCount: Int?,
-    val chargingPolicy: Int?,
-    val stateOfHealthPercent: Long?
+    val present: Boolean?
 ) {
     val temperatureC: Float?
         get() = temperatureDeciC?.div(10f)
 
-    val currentNowMa: Float?
+    /**
+     * Many devices appear to expose current values scaled as though they were µA,
+     * but the observed magnitudes line up more closely with amps after dividing by 1000.
+     */
+    val currentNowA: Float?
         get() = currentNowUa?.div(1000f)
 
-    val currentAverageMa: Float?
+    val currentAverageA: Float?
         get() = currentAverageUa?.div(1000f)
 
     val voltageV: Float?
@@ -40,7 +41,11 @@ data class BatterySnapshot(
     /**
      * Approximate net power at the battery boundary, not charger coil output.
      */
-    val netPowerMw: Float?
+    /**
+     * Display-scaled battery power. Numerically this is the same calculation as before,
+     * but surfaced as watts to match the observed device behaviour.
+     */
+    val netPowerW: Float?
         get() = if (currentNowUa != null && voltageMv != null) {
             (currentNowUa.toLong() * voltageMv.toLong()) / 1_000_000f
         } else {

@@ -14,8 +14,9 @@ import kotlinx.coroutines.launch
 data class BatteryUiState(
     val snapshot: BatterySnapshot? = null,
     val sampleIntervalMs: Long = 500L,
-    val maxObservedPowerMw: Float? = null,
-    val minObservedPowerMw: Float? = null
+    val maxObservedPowerW: Float? = null,
+    val minObservedPowerW: Float? = null,
+    val history: List<BatterySnapshot> = emptyList()
 )
 
 class BatteryViewModel(application: Application) : AndroidViewModel(application) {
@@ -26,6 +27,7 @@ class BatteryViewModel(application: Application) : AndroidViewModel(application)
     val uiState: StateFlow<BatteryUiState> = _uiState.asStateFlow()
 
     private var observationJob: Job? = null
+    private val maxHistoryPoints = 60
 
     init {
         startObserving()
@@ -40,17 +42,21 @@ class BatteryViewModel(application: Application) : AndroidViewModel(application)
         observationJob?.cancel()
         observationJob = viewModelScope.launch {
             repository.observeBattery(_uiState.value.sampleIntervalMs).collect { snapshot ->
-                val currentMax = _uiState.value.maxObservedPowerMw
-                val currentMin = _uiState.value.minObservedPowerMw
-                val power = snapshot.netPowerMw
-                _uiState.value = _uiState.value.copy(
+                val currentState = _uiState.value
+                val currentMax = currentState.maxObservedPowerW
+                val currentMin = currentState.minObservedPowerW
+                val power = snapshot.netPowerW
+                val updatedHistory = (currentState.history + snapshot).takeLast(maxHistoryPoints)
+
+                _uiState.value = currentState.copy(
                     snapshot = snapshot,
-                    maxObservedPowerMw = when {
+                    history = updatedHistory,
+                    maxObservedPowerW = when {
                         power == null -> currentMax
                         currentMax == null -> power
                         else -> maxOf(currentMax, power)
                     },
-                    minObservedPowerMw = when {
+                    minObservedPowerW = when {
                         power == null -> currentMin
                         currentMin == null -> power
                         else -> minOf(currentMin, power)

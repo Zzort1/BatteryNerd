@@ -34,28 +34,24 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-
     buildFeatures {
         compose = true
     }
-
 }
 
 dependencies {
-    implementation(libs.androidx.core.ktx.v1150)
-    implementation(libs.androidx.lifecycle.runtime.ktx.v287)
-    implementation(libs.androidx.lifecycle.viewmodel.compose)
-    implementation(libs.material)
-    implementation(libs.androidx.activity.compose.v1101)
+    implementation(libs.androidx.core.ktx.v1180)
+    implementation(libs.androidx.lifecycle.runtime.ktx.v2100)
+    implementation(libs.androidx.activity.compose.v1130)
+    implementation(libs.androidx.lifecycle.viewmodel.compose.v2100)
+    implementation(libs.material.v1120)
+    implementation(platform(libs.androidx.compose.bom.v20260301))
+    implementation(libs.ui)
+    implementation(libs.ui.tooling.preview)
+    implementation(libs.material3)
+    implementation(libs.androidx.material.icons.extended)
+    implementation(libs.androidx.foundation)
 
-    implementation(platform(libs.androidx.compose.bom.v20250200))
-    implementation(libs.androidx.ui)
-    implementation(libs.androidx.ui.tooling.preview)
-    implementation(libs.androidx.material3)
-    implementation(libs.androidx.compose.foundation)
-    implementation(libs.androidx.compose.material.icons.extended)
-
-    debugImplementation(libs.androidx.ui.tooling)
-    debugImplementation(libs.androidx.ui.test.manifest)
-
+    debugImplementation(libs.ui.tooling)
+    debugImplementation(libs.ui.test.manifest)
 }

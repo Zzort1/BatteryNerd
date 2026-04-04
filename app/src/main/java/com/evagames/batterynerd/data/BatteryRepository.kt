@@ -22,55 +22,23 @@ class BatteryRepository(private val context: Context) {
     }
 
     fun readSnapshot(): BatterySnapshot {
-        val batteryIntent = context.registerReceiver(
-            null,
-            IntentFilter(Intent.ACTION_BATTERY_CHANGED)
-        )
+        val batteryIntent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
 
-        val level = batteryIntent
-            ?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
-            ?.takeIf { it >= 0 }
-
-        val scale = batteryIntent
-            ?.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
-            ?.takeIf { it > 0 }
-
-        val percent = if (level != null && scale != null) {
-            level * 100f / scale
-        } else {
-            null
-        }
-
-        val status = batteryIntent
-            ?.getIntExtra(BatteryManager.EXTRA_STATUS, Int.MIN_VALUE)
+        val level = batteryIntent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)?.takeIf { it >= 0 }
+        val scale = batteryIntent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1)?.takeIf { it > 0 }
+        val percent = if (level != null && scale != null) level * 100f / scale else null
+        val status = batteryIntent?.getIntExtra(BatteryManager.EXTRA_STATUS, Int.MIN_VALUE)
             ?.takeUnless { it == Int.MIN_VALUE }
-
-        val health = batteryIntent
-            ?.getIntExtra(BatteryManager.EXTRA_HEALTH, Int.MIN_VALUE)
+        val health = batteryIntent?.getIntExtra(BatteryManager.EXTRA_HEALTH, Int.MIN_VALUE)
             ?.takeUnless { it == Int.MIN_VALUE }
-
-        val plugged = batteryIntent
-            ?.getIntExtra(BatteryManager.EXTRA_PLUGGED, Int.MIN_VALUE)
+        val plugged = batteryIntent?.getIntExtra(BatteryManager.EXTRA_PLUGGED, Int.MIN_VALUE)
             ?.takeUnless { it == Int.MIN_VALUE }
-
-        val voltageMv = batteryIntent
-            ?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, Int.MIN_VALUE)
+        val voltageMv = batteryIntent?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, Int.MIN_VALUE)
             ?.takeUnless { it == Int.MIN_VALUE }
-
-        val temperatureDeciC = batteryIntent
-            ?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Int.MIN_VALUE)
+        val temperatureDeciC = batteryIntent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Int.MIN_VALUE)
             ?.takeUnless { it == Int.MIN_VALUE }
-
         val technology = batteryIntent?.getStringExtra(BatteryManager.EXTRA_TECHNOLOGY)
         val present = batteryIntent?.getBooleanExtra(BatteryManager.EXTRA_PRESENT, false)
-
-        val cycleCount = batteryIntent
-            ?.getIntExtra(BatteryManager.EXTRA_CYCLE_COUNT, Int.MIN_VALUE)
-            ?.takeUnless { it == Int.MIN_VALUE }
-
-        val chargingStatus = batteryIntent
-            ?.getIntExtra(BatteryManager.EXTRA_CHARGING_STATUS, Int.MIN_VALUE)
-            ?.takeUnless { it == Int.MIN_VALUE }
 
         return BatterySnapshot(
             capturedAt = Instant.now(),
@@ -90,10 +58,7 @@ class BatteryRepository(private val context: Context) {
             voltageMv = voltageMv,
             temperatureDeciC = temperatureDeciC,
             technology = technology,
-            present = present,
-            cycleCount = cycleCount,
-            chargingPolicy = chargingStatus,
-            stateOfHealthPercent = null
+            present = present
         )
     }
 
@@ -109,5 +74,17 @@ class BatteryRepository(private val context: Context) {
     private fun readLongProperty(id: Int): Long? {
         val value = batteryManager.getLongProperty(id)
         return value.takeUnless { it == Long.MIN_VALUE }
+    }
+
+    private fun readIntPropertyIfSupported(id: Int): Int? = try {
+        readIntProperty(id)
+    } catch (_: Throwable) {
+        null
+    }
+
+    private fun readLongPropertyIfSupported(id: Int): Long? = try {
+        readLongProperty(id)
+    } catch (_: Throwable) {
+        null
     }
 }
