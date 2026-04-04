@@ -31,7 +31,7 @@ import androidx.compose.material.icons.automirrored.rounded.List
 import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Home
-import androidx.compose.material.icons.rounded.List
+import androidx.compose.material.icons.rounded.OpenInFull
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Thermostat
 import androidx.compose.material.icons.rounded.WaterDrop
@@ -39,7 +39,9 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -65,6 +67,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.evagames.batterynerd.data.BatterySnapshot
@@ -82,11 +85,26 @@ private enum class DashboardTab(val label: String, val icon: androidx.compose.ui
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BatteryDashboard(viewModel: BatteryViewModel = viewModel()) {
+fun BatteryDashboard(
+    viewModel: BatteryViewModel = viewModel(),
+    isInPictureInPicture: Boolean = false,
+    onEnterPictureInPicture: () -> Unit = {},
+) {
     val uiState by viewModel.uiState.collectAsState()
     val snapshot = uiState.snapshot
     val subtitleColor = MaterialTheme.colorScheme.onSurfaceVariant
     var selectedTab by remember { mutableStateOf(DashboardTab.Visual) }
+
+    if (isInPictureInPicture) {
+        if (snapshot == null) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("Reading battery telemetry…")
+            }
+        } else {
+            PipMonitor(snapshot = snapshot)
+        }
+        return
+    }
 
     Scaffold(
         topBar = {
@@ -134,7 +152,8 @@ fun BatteryDashboard(viewModel: BatteryViewModel = viewModel()) {
                 DashboardTab.Visual -> VisualTab(
                     snapshot = snapshot,
                     history = uiState.history,
-                    padding = padding
+                    padding = padding,
+                    onEnterPictureInPicture = onEnterPictureInPicture
                 )
                 DashboardTab.Home -> HomeTab(
                     snapshot = snapshot,
@@ -143,7 +162,8 @@ fun BatteryDashboard(viewModel: BatteryViewModel = viewModel()) {
                     maxObservedPowerW = uiState.maxObservedPowerW,
                     minObservedPowerW = uiState.minObservedPowerW,
                     onSampleIntervalChanged = viewModel::setSampleInterval,
-                    padding = padding
+                    padding = padding,
+                    onEnterPictureInPicture = onEnterPictureInPicture
                 )
                 DashboardTab.Details -> DetailsTab(snapshot = snapshot, padding = padding)
             }
@@ -159,7 +179,8 @@ private fun HomeTab(
     maxObservedPowerW: Float?,
     minObservedPowerW: Float?,
     onSampleIntervalChanged: (Long) -> Unit,
-    padding: PaddingValues
+    padding: PaddingValues,
+    onEnterPictureInPicture: () -> Unit
 ) {
     LazyColumn(
         modifier = Modifier
@@ -175,6 +196,9 @@ private fun HomeTab(
                 maxObservedPowerW = maxObservedPowerW,
                 minObservedPowerW = minObservedPowerW
             )
+        }
+        item {
+            MiniModeCard(onEnterPictureInPicture = onEnterPictureInPicture)
         }
         item {
             SamplingSelector(
@@ -219,7 +243,8 @@ private fun DetailsTab(snapshot: BatterySnapshot, padding: PaddingValues) {
 private fun VisualTab(
     snapshot: BatterySnapshot,
     history: List<BatterySnapshot>,
-    padding: PaddingValues
+    padding: PaddingValues,
+    onEnterPictureInPicture: () -> Unit
 ) {
     LazyColumn(
         modifier = Modifier
@@ -239,6 +264,7 @@ private fun VisualTab(
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+                    MiniModeCard(onEnterPictureInPicture = onEnterPictureInPicture)
                     BatteryTankVisual(snapshot = snapshot)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -266,7 +292,71 @@ private fun VisualTab(
 }
 
 @Composable
-private fun BatteryTankVisual(snapshot: BatterySnapshot) {
+private fun MiniModeCard(onEnterPictureInPicture: () -> Unit) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "Mini mode",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer
+            )
+            FilledTonalIconButton(onClick = onEnterPictureInPicture) {
+                Icon(
+                    Icons.Rounded.OpenInFull,
+                    contentDescription = "Enter picture-in-picture"
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PipMonitor(snapshot: BatterySnapshot) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(10.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            BatteryTankVisual(snapshot = snapshot, tankHeight = 120.dp)
+            Text(
+                text = formatPower(snapshot.netPowerW),
+                style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                MiniStat(label = "A", value = formatCurrent(snapshot.currentNowA))
+                MiniStat(label = "V", value = formatVoltage(snapshot.voltageV))
+                MiniStat(label = "%", value = formatPercent(snapshot.percent))
+            }
+            Text(
+                text = if (snapshot.isCharging) "Charging" else "Discharging",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun BatteryTankVisual(snapshot: BatterySnapshot, modifier: Modifier = Modifier, tankHeight: Dp = 280.dp) {
     val percent = ((snapshot.percent ?: 0f) / 100f).coerceIn(0f, 1f)
     val colorScheme = MaterialTheme.colorScheme
     val tankCapColor = colorScheme.outlineVariant
@@ -296,9 +386,9 @@ private fun BatteryTankVisual(snapshot: BatterySnapshot) {
     )
 
     Canvas(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .height(280.dp)
+            .height(tankHeight)
     ) {
         val strokeWidth = 10.dp.toPx()
         val innerPadding = strokeWidth * 0.7f
