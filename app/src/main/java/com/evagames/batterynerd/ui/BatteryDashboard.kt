@@ -80,6 +80,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.PI
+import kotlin.math.floor
 import kotlin.math.sin
 
 private enum class DashboardTab(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
@@ -759,14 +760,15 @@ private fun BatteryTankVisual(snapshot: BatterySnapshot, modifier: Modifier = Mo
             val laneInset = 0.12f
             val laneWidthFraction = 1f - laneInset * 2f
             repeat(chargingDropletCount) { index ->
-                val lane = (pseudoRandom01(index * 53 + 17) * laneCount).toInt().coerceIn(0, laneCount - 1)
-                val laneFraction = if (laneCount == 1) 0.5f else laneInset + (lane / (laneCount - 1f)) * laneWidthFraction
-                val laneJitter = (pseudoRandom01(index * 97 + 29) - 0.5f) * (laneWidthFraction / laneCount) * 0.7f
-                val laneX = innerLeft + innerWidth * (laneFraction + laneJitter).coerceIn(0.1f, 0.9f)
-                val phase = (dropletOffset + index * 0.097f + pseudoRandom01(index * 41 + 5) * 0.33f) % 1f
-                val rowOffset = pseudoRandom01(index * 19 + 7) * 42.dp.toPx()
-                val startY = innerTop - 34.dp.toPx() - rowOffset
-                val travel = (liquidTop - startY - 8.dp.toPx()).coerceAtLeast(24.dp.toPx())
+                val lane = index % laneCount
+                val row = index / laneCount
+                val motion = dropletOffset + index * 0.11f + row * 0.17f
+                val cycle = floor(motion).toInt()
+                val phase = motion - floor(motion)
+                val seededLane = pseudoRandom01(seed = cycle * 131 + index * 97 + lane * 53 + 17)
+                val laneX = innerLeft + innerWidth * (0.12f + seededLane * 0.76f)
+                val startY = tankTop - 34.dp.toPx() - row * 18.dp.toPx()
+                val travel = (liquidTop - startY - 10.dp.toPx()).coerceAtLeast(24.dp.toPx())
                 val y = startY + phase * travel
                 val radiusPx = 2.8.dp.toPx() + (1f - phase) * 2.6.dp.toPx()
                 drawCircle(
@@ -782,14 +784,15 @@ private fun BatteryTankVisual(snapshot: BatterySnapshot, modifier: Modifier = Mo
             val laneInset = 0.12f
             val laneWidthFraction = 1f - laneInset * 2f
             repeat(dischargingDropletCount) { index ->
-                val lane = (pseudoRandom01(index * 53 + 17) * laneCount).toInt().coerceIn(0, laneCount - 1)
-                val laneFraction = if (laneCount == 1) 0.5f else laneInset + (lane / (laneCount - 1f)) * laneWidthFraction
-                val laneJitter = (pseudoRandom01(index * 97 + 29) - 0.5f) * (laneWidthFraction / laneCount) * 0.7f
-                val laneX = innerLeft + innerWidth * (laneFraction + laneJitter).coerceIn(0.1f, 0.9f)
-                val phase = (dropletOffset + index * 0.097f + pseudoRandom01(index * 41 + 5) * 0.33f) % 1f
-                val rowOffset = pseudoRandom01(index * 19 + 7) * 42.dp.toPx()
-                val startY = (liquidTop + 10.dp.toPx() + rowOffset * 0.4f).coerceAtMost(innerTop + innerHeight - 8.dp.toPx())
-                val endY = innerTop - 34.dp.toPx() - rowOffset
+                val lane = index % laneCount
+                val row = index / laneCount
+                val motion = dropletOffset + index * 0.11f + row * 0.17f
+                val cycle = floor(motion).toInt()
+                val phase = motion - floor(motion)
+                val seededLane = pseudoRandom01(seed = cycle * 151 + index * 101 + lane * 47 + 23)
+                val laneX = innerLeft + innerWidth * (0.12f + seededLane * 0.76f)
+                val startY = (liquidTop + 12.dp.toPx() + row * 16.dp.toPx()).coerceAtMost(innerTop + innerHeight - 10.dp.toPx())
+                val endY = tankTop - 34.dp.toPx() - row * 18.dp.toPx()
                 val travel = (startY - endY).coerceAtLeast(24.dp.toPx())
                 val y = startY - phase * travel
                 val radiusPx = 2.8.dp.toPx() + phase * 2.6.dp.toPx()
