@@ -670,9 +670,9 @@ private fun BatteryTankVisual(snapshot: BatterySnapshot, modifier: Modifier = Mo
     )
     val dropletOffset by infiniteTransition.animateFloat(
         initialValue = 0f,
-        targetValue = 1f,
+        targetValue = 1000f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1050, easing = LinearEasing),
+            animation = tween(durationMillis = 1050000, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
         label = "droplet_offset"
@@ -756,21 +756,30 @@ private fun BatteryTankVisual(snapshot: BatterySnapshot, modifier: Modifier = Mo
         }
 
         if (chargingDropletCount > 0) {
-            val laneCount = chargingDropletCount.coerceAtMost(25)
-            val laneInset = 0.12f
-            val laneWidthFraction = 1f - laneInset * 2f
+            val totalLaneCount = 25
+            val laneInsetFraction = 0.10f
+            val usableWidthFraction = 1f - laneInsetFraction * 2f
+
             repeat(chargingDropletCount) { index ->
-                val lane = index % laneCount
-                val row = index / laneCount
+                val row = index / totalLaneCount
                 val motion = dropletOffset + index * 0.11f + row * 0.17f
                 val cycle = floor(motion).toInt()
-                val phase = motion - floor(motion)
-                val seededLane = pseudoRandom01(seed = cycle * 131 + index * 97 + lane * 53 + 17)
-                val laneX = innerLeft + innerWidth * (0.12f + seededLane * 0.76f)
+                val phase = motion - cycle
+
+                val laneIndex = pseudoRandomInt(
+                    seed = cycle * 131 + index * 97 + 17,
+                    bound = totalLaneCount
+                )
+                val laneFraction = (laneIndex + 0.5f) / totalLaneCount.toFloat()
+                val laneX = innerLeft + innerWidth * (
+                        laneInsetFraction + laneFraction * usableWidthFraction
+                        )
+
                 val startY = tankTop - 34.dp.toPx() - row * 18.dp.toPx()
                 val travel = (liquidTop - startY - 10.dp.toPx()).coerceAtLeast(24.dp.toPx())
                 val y = startY + phase * travel
                 val radiusPx = 2.8.dp.toPx() + (1f - phase) * 2.6.dp.toPx()
+
                 drawCircle(
                     color = dropletColor.copy(alpha = 0.28f + (1f - phase) * 0.48f),
                     radius = radiusPx,
@@ -780,22 +789,35 @@ private fun BatteryTankVisual(snapshot: BatterySnapshot, modifier: Modifier = Mo
         }
 
         if (dischargingDropletCount > 0) {
-            val laneCount = dischargingDropletCount.coerceAtMost(25)
-            val laneInset = 0.12f
-            val laneWidthFraction = 1f - laneInset * 2f
+            val totalLaneCount = 25
+            val laneInsetFraction = 0.10f
+            val usableWidthFraction = 1f - laneInsetFraction * 2f
+
             repeat(dischargingDropletCount) { index ->
-                val lane = index % laneCount
-                val row = index / laneCount
+                val row = index / totalLaneCount
                 val motion = dropletOffset + index * 0.11f + row * 0.17f
                 val cycle = floor(motion).toInt()
-                val phase = motion - floor(motion)
-                val seededLane = pseudoRandom01(seed = cycle * 151 + index * 101 + lane * 47 + 23)
-                val laneX = innerLeft + innerWidth * (0.12f + seededLane * 0.76f)
-                val startY = (liquidTop + 12.dp.toPx() + row * 16.dp.toPx()).coerceAtMost(innerTop + innerHeight - 10.dp.toPx())
+                val phase = motion - cycle
+
+                val laneIndex = pseudoRandomInt(
+                    seed = cycle * 151 + index * 101 + 23,
+                    bound = totalLaneCount
+                )
+                val laneFraction = (laneIndex + 0.5f) / totalLaneCount.toFloat()
+                val jitter = (pseudoRandom01(cycle * 181 + index * 71 + 29) - 0.5f) *
+                        (innerWidth / totalLaneCount) * 0.35f
+
+                val laneX = innerLeft + innerWidth * (
+                        laneInsetFraction + laneFraction * usableWidthFraction
+                        ) + jitter
+
+                val startY = (liquidTop + 12.dp.toPx() + row * 16.dp.toPx())
+                    .coerceAtMost(innerTop + innerHeight - 10.dp.toPx())
                 val endY = tankTop - 34.dp.toPx() - row * 18.dp.toPx()
                 val travel = (startY - endY).coerceAtLeast(24.dp.toPx())
                 val y = startY - phase * travel
                 val radiusPx = 2.8.dp.toPx() + phase * 2.6.dp.toPx()
+
                 drawCircle(
                     color = dropletColor.copy(alpha = 0.24f + phase * 0.52f),
                     radius = radiusPx,
@@ -828,6 +850,13 @@ private fun BatteryTankVisual(snapshot: BatterySnapshot, modifier: Modifier = Mo
             color = Color.White.copy(alpha = if (snapshot.isCharging) 0.92f else 0.35f)
         )
     }
+}
+
+private fun pseudoRandomInt(seed: Int, bound: Int): Int {
+    if (bound <= 0) return 0
+    var x = seed * 1103515245 + 12345
+    x = x xor (x ushr 16)
+    return (x and 0x7fffffff) % bound
 }
 
 @Composable
