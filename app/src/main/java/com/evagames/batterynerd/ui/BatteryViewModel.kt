@@ -16,7 +16,10 @@ data class BatteryUiState(
     val sampleIntervalMs: Long = 500L,
     val maxObservedPowerW: Float? = null,
     val minObservedPowerW: Float? = null,
-    val history: List<BatterySnapshot> = emptyList()
+    val history: List<BatterySnapshot> = emptyList(),
+    val rollingAveragePowerW: Float? = null,
+    val estimatedTimeRemainingMs: Long? = null,
+    val estimatedTimeToFullMs: Long? = null
 )
 
 class BatteryViewModel(application: Application) : AndroidViewModel(application) {
@@ -27,7 +30,9 @@ class BatteryViewModel(application: Application) : AndroidViewModel(application)
     val uiState: StateFlow<BatteryUiState> = _uiState.asStateFlow()
 
     private var observationJob: Job? = null
-    private val maxHistoryPoints = 60
+    private val rollingWindowMs = 60_000L
+
+    private fun historyCapacityFor(intervalMs: Long): Int = ((rollingWindowMs / intervalMs) + 10L).toInt().coerceAtLeast(60)
 
     init {
         startObserving()
@@ -46,7 +51,17 @@ class BatteryViewModel(application: Application) : AndroidViewModel(application)
                 val currentMax = currentState.maxObservedPowerW
                 val currentMin = currentState.minObservedPowerW
                 val power = snapshot.netPowerW
-                val updatedHistory = (currentState.history + snapshot).takeLast(maxHistoryPoints)
+                val historyCapacity = historyCapacityFor(currentState.sampleIntervalMs)
+                val updatedHistory = (currentState.history + snapshot).takeLast(historyCapacity)
+                val windowStart = snapshot.capturedAt.minusMillis(rollingWindowMs)
+                val rollingSamples = updatedHistory.filter { !it.capturedAt.isBefore(windowStart) }
+                val rollingAveragePowerW = rollingSamples
+                    .mapNotNull { it.netPowerW }
+                    .takeIf { it.isNotEmpty() }
+                    ?.average()
+                    ?.toFloat()
+                val estimatedTimeRemainingMs = snapshot.estimatedTimeRemainingMsForPower(rollingAveragePowerW)
+                val estimatedTimeToFullMs = snapshot.estimatedTimeToFullMsForPower(rollingAveragePowerW)
 
                 _uiState.value = currentState.copy(
                     snapshot = snapshot,
@@ -60,7 +75,10 @@ class BatteryViewModel(application: Application) : AndroidViewModel(application)
                         power == null -> currentMin
                         currentMin == null -> power
                         else -> minOf(currentMin, power)
-                    }
+                    },
+                    rollingAveragePowerW = rollingAveragePowerW,
+                    estimatedTimeRemainingMs = estimatedTimeRemainingMs,
+                    estimatedTimeToFullMs = estimatedTimeToFullMs
                 )
             }
         }

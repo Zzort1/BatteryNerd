@@ -39,9 +39,9 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -67,6 +67,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -122,6 +124,21 @@ fun BatteryDashboard(
                             color = subtitleColor
                         )
                     }
+                },
+                actions = {
+                    FilledIconButton(
+                        onClick = onEnterPictureInPicture,
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    ) {
+                        Icon(
+                            Icons.Rounded.OpenInFull,
+                            contentDescription = "Enter picture-in-picture"
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
                 }
             )
         },
@@ -152,8 +169,8 @@ fun BatteryDashboard(
                 DashboardTab.Visual -> VisualTab(
                     snapshot = snapshot,
                     history = uiState.history,
-                    padding = padding,
-                    onEnterPictureInPicture = onEnterPictureInPicture
+                    estimatedTimeMs = currentEstimateMs(uiState),
+                    padding = padding
                 )
                 DashboardTab.Home -> HomeTab(
                     snapshot = snapshot,
@@ -161,11 +178,17 @@ fun BatteryDashboard(
                     sampleIntervalMs = uiState.sampleIntervalMs,
                     maxObservedPowerW = uiState.maxObservedPowerW,
                     minObservedPowerW = uiState.minObservedPowerW,
+                    estimatedTimeMs = currentEstimateMs(uiState),
+                    rollingAveragePowerW = uiState.rollingAveragePowerW,
                     onSampleIntervalChanged = viewModel::setSampleInterval,
-                    padding = padding,
-                    onEnterPictureInPicture = onEnterPictureInPicture
+                    padding = padding
                 )
-                DashboardTab.Details -> DetailsTab(snapshot = snapshot, padding = padding)
+                DashboardTab.Details -> DetailsTab(
+                    snapshot = snapshot,
+                    estimatedTimeMs = currentEstimateMs(uiState),
+                    rollingAveragePowerW = uiState.rollingAveragePowerW,
+                    padding = padding
+                )
             }
         }
     }
@@ -178,9 +201,10 @@ private fun HomeTab(
     sampleIntervalMs: Long,
     maxObservedPowerW: Float?,
     minObservedPowerW: Float?,
+    estimatedTimeMs: Long?,
+    rollingAveragePowerW: Float?,
     onSampleIntervalChanged: (Long) -> Unit,
-    padding: PaddingValues,
-    onEnterPictureInPicture: () -> Unit
+    padding: PaddingValues
 ) {
     LazyColumn(
         modifier = Modifier
@@ -194,11 +218,10 @@ private fun HomeTab(
                 snapshot = snapshot,
                 sampleIntervalMs = sampleIntervalMs,
                 maxObservedPowerW = maxObservedPowerW,
-                minObservedPowerW = minObservedPowerW
+                minObservedPowerW = minObservedPowerW,
+                estimatedTimeMs = estimatedTimeMs,
+                rollingAveragePowerW = rollingAveragePowerW
             )
-        }
-        item {
-            MiniModeCard(onEnterPictureInPicture = onEnterPictureInPicture)
         }
         item {
             SamplingSelector(
@@ -222,7 +245,12 @@ private fun HomeTab(
 }
 
 @Composable
-private fun DetailsTab(snapshot: BatterySnapshot, padding: PaddingValues) {
+private fun DetailsTab(
+    snapshot: BatterySnapshot,
+    estimatedTimeMs: Long?,
+    rollingAveragePowerW: Float?,
+    padding: PaddingValues
+) {
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -233,7 +261,7 @@ private fun DetailsTab(snapshot: BatterySnapshot, padding: PaddingValues) {
         item {
             SectionTitle("Raw and derived telemetry")
         }
-        items(detailRows(snapshot)) { row ->
+        items(detailRows(snapshot, estimatedTimeMs, rollingAveragePowerW)) { row ->
             MetricRow(label = row.first, value = row.second)
         }
     }
@@ -243,9 +271,8 @@ private fun DetailsTab(snapshot: BatterySnapshot, padding: PaddingValues) {
 private fun VisualTab(
     snapshot: BatterySnapshot,
     history: List<BatterySnapshot>,
-    padding: PaddingValues,
-    onEnterPictureInPicture: () -> Unit
-) {
+    estimatedTimeMs: Long?,
+    padding: PaddingValues) {
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -264,7 +291,6 @@ private fun VisualTab(
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    MiniModeCard(onEnterPictureInPicture = onEnterPictureInPicture)
                     BatteryTankVisual(snapshot = snapshot)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -272,7 +298,7 @@ private fun VisualTab(
                     ) {
                         MiniStat(label = "Level", value = formatPercent(snapshot.percent))
                         MiniStat(label = "Power", value = formatPower(snapshot.netPowerW))
-                        MiniStat(label = "Current", value = formatCurrent(snapshot.currentNowA))
+                        MiniStat(label = estimateMiniLabel(snapshot), value = formatEstimateDuration(estimatedTimeMs))
                     }
                     Text(
                         text = visualStatusText(snapshot),
@@ -282,74 +308,44 @@ private fun VisualTab(
                 }
             }
         }
-        item {
-            SectionTitle("Charge flow trend")
-        }
-        item {
-            LivePowerChart(history = history)
-        }
-    }
-}
-
-@Composable
-private fun MiniModeCard(onEnterPictureInPicture: () -> Unit) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                "Mini mode",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSecondaryContainer
-            )
-            FilledTonalIconButton(onClick = onEnterPictureInPicture) {
-                Icon(
-                    Icons.Rounded.OpenInFull,
-                    contentDescription = "Enter picture-in-picture"
-                )
-            }
-        }
     }
 }
 
 @Composable
 private fun PipMonitor(snapshot: BatterySnapshot) {
+    val pipBackground = Color(0xFF090B13)
+    val primaryText = Color(0xFFF5F7FF)
+    val secondaryText = Color(0xFFD4DBF5)
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(10.dp),
+            .background(pipBackground)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            BatteryTankVisual(snapshot = snapshot, tankHeight = 120.dp)
+            BatteryTankVisual(snapshot = snapshot, tankHeight = 96.dp)
             Text(
-                text = formatPower(snapshot.netPowerW),
-                style = MaterialTheme.typography.headlineLarge,
-                fontWeight = FontWeight.Bold
+                text = formatPipPower(snapshot.netPowerW),
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                color = primaryText,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Clip,
+                textAlign = TextAlign.Center
             )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                MiniStat(label = "A", value = formatCurrent(snapshot.currentNowA))
-                MiniStat(label = "V", value = formatVoltage(snapshot.voltageV))
-                MiniStat(label = "%", value = formatPercent(snapshot.percent))
-            }
             Text(
-                text = if (snapshot.isCharging) "Charging" else "Discharging",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                text = if (snapshot.isCharging) "Charging" else "On battery",
+                style = MaterialTheme.typography.labelMedium,
+                color = secondaryText,
+                maxLines = 1,
+                textAlign = TextAlign.Center
             )
         }
     }
@@ -639,7 +635,9 @@ private fun HeroCard(
     snapshot: BatterySnapshot,
     sampleIntervalMs: Long,
     maxObservedPowerW: Float?,
-    minObservedPowerW: Float?
+    minObservedPowerW: Float?,
+    estimatedTimeMs: Long?,
+    rollingAveragePowerW: Float?
 ) {
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
@@ -651,7 +649,7 @@ private fun HeroCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column {
-                    Text("Net battery-side charge power", style = MaterialTheme.typography.titleMedium)
+                    Text("Net battery power", style = MaterialTheme.typography.titleMedium)
                     Text(
                         formatPower(snapshot.netPowerW),
                         style = MaterialTheme.typography.displaySmall,
@@ -670,11 +668,20 @@ private fun HeroCard(
                 })
                 AssistChip(onClick = {}, label = { Text(sourceLabel(snapshot.plugType)) })
                 AssistChip(onClick = {}, label = { Text(statusLabel(snapshot.status, snapshot.isCharging)) })
-                AssistChip(onClick = {}, label = { Text("Sample ${sampleIntervalMs} ms") })
             }
+            Text(
+                text = estimateHeadline(snapshot, estimatedTimeMs),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium
+            )
             Text(
                 text = "Observed window: min ${formatPower(minObservedPowerW)} • max ${formatPower(maxObservedPowerW)}",
                 style = MaterialTheme.typography.bodyMedium
+            )
+            Text(
+                text = "Estimate uses the last minute average: ${formatPower(rollingAveragePowerW)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
@@ -683,7 +690,7 @@ private fun HeroCard(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SamplingSelector(selected: Long, onSelected: (Long) -> Unit) {
-    val options = listOf(250L, 500L, 1000L, 2000L)
+    val options = listOf(500L, 1000L, 2000L)
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Refresh cadence", style = MaterialTheme.typography.titleMedium)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -746,7 +753,11 @@ private fun MetricRow(label: String, value: String) {
     }
 }
 
-private fun detailRows(snapshot: BatterySnapshot): List<Pair<String, String>> {
+private fun detailRows(
+    snapshot: BatterySnapshot,
+    estimatedTimeMs: Long?,
+    rollingAveragePowerW: Float?
+): List<Pair<String, String>> {
     val formatter = DateTimeFormatter.ofPattern("HH:mm:ss.SSS", Locale.US)
         .withZone(ZoneId.systemDefault())
 
@@ -769,14 +780,39 @@ private fun detailRows(snapshot: BatterySnapshot): List<Pair<String, String>> {
         "Estimated net power (displayed)" to formatPower(snapshot.netPowerW),
         "Charge counter" to nullable(snapshot.chargeCounterUah?.let { "$it µAh" }),
         "Energy counter" to nullable(snapshot.energyCounterNwh?.let { "$it nWh" }),
-        "Stored energy (derived)" to nullable(snapshot.storedEnergyMwh?.let { String.format(Locale.US, "%.2f mWh", it) }),
-        "Charge time remaining" to nullable(snapshot.chargeTimeRemainingMs?.let { formatDuration(it) }),
+        "Stored energy (derived)" to nullable(snapshot.storedEnergyMwh?.let { formatEnergyMwh(it) }),
+        "Estimated full energy" to nullable(snapshot.estimatedFullEnergyMwh?.let { formatEnergyMwh(it) }),
+        "Energy remaining to full" to nullable(snapshot.energyToFullMwh?.let { formatEnergyMwh(it) }),
+        "Charge time remaining (system API)" to nullable(snapshot.chargeTimeRemainingMs?.let { formatDuration(it) }),
+        "Instant estimate from current watts" to nullable(
+            (if (snapshot.isCharging) snapshot.estimatedTimeToFullMs else snapshot.estimatedTimeRemainingMs)
+                ?.let { formatDuration(it) }
+        ),
+        "Rolling average power (last minute)" to formatPower(rollingAveragePowerW),
+        "Smoothed estimate" to nullable(estimatedTimeMs?.let { formatDuration(it) }),
         "Temperature" to nullable(snapshot.temperatureDeciC?.let { "$it deci-°C" }),
         "Temperature (derived)" to formatTemperature(snapshot.temperatureC),
         "Technology" to nullable(snapshot.technology),
         "Battery present" to nullable(snapshot.present?.toString())
     )
 }
+
+
+private fun estimateMiniLabel(snapshot: BatterySnapshot): String =
+    if (snapshot.isCharging) "To full" else "Remaining"
+
+private fun estimateHeadline(snapshot: BatterySnapshot, estimatedTimeMs: Long?): String = when {
+    snapshot.isCharging -> "Estimated time to full: ${formatEstimateDuration(estimatedTimeMs)}"
+    else -> "Estimated battery life left: ${formatEstimateDuration(estimatedTimeMs)}"
+}
+
+
+private fun formatEstimateDuration(durationMs: Long?): String =
+    durationMs?.let { formatDuration(it) } ?: "Estimating…"
+
+private fun formatEnergyMwh(valueMwh: Float): String =
+    String.format(Locale.US, "%.0f mWh", valueMwh)
+
 
 private fun nullable(value: String?): String = value ?: "Unsupported / unavailable"
 
@@ -794,6 +830,16 @@ private fun formatTemperature(valueC: Float?): String =
 
 private fun formatPower(powerW: Float?): String =
     powerW?.let { String.format(Locale.US, "%.2f W", it) } ?: "Unsupported / unavailable"
+
+private fun formatPipPower(powerW: Float?): String {
+    val value = powerW ?: return "—"
+    val absValue = kotlin.math.abs(value)
+    return if (absValue < 1f) {
+        String.format(Locale.US, "%.0f mW", value * 1000f)
+    } else {
+        String.format(Locale.US, "%.1f W", value)
+    }
+}
 
 private fun formatDuration(ms: Long): String {
     val totalSeconds = ms / 1000
@@ -835,3 +881,7 @@ private fun healthLabel(health: Int?): String = when (health) {
 private fun SectionTitle(title: String) {
     Text(title, style = MaterialTheme.typography.titleLarge)
 }
+
+
+private fun currentEstimateMs(uiState: BatteryUiState): Long? =
+    if (uiState.snapshot?.isCharging == true) uiState.estimatedTimeToFullMs else uiState.estimatedTimeRemainingMs
