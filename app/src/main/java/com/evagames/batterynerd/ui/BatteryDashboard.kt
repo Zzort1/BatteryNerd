@@ -756,7 +756,9 @@ private fun BatteryTankVisual(snapshot: BatterySnapshot, modifier: Modifier = Mo
         }
 
         if (chargingDropletCount > 0) {
-            val laneCount = minOf(chargingDropletCount, 6)
+            val laneCount = chargingDropletCount.coerceAtMost(25)
+            val laneInset = 0.12f
+            val laneWidthFraction = 1f - laneInset * 2f
             repeat(chargingDropletCount) { index ->
                 val lane = index % laneCount
                 val row = index / laneCount
@@ -768,17 +770,19 @@ private fun BatteryTankVisual(snapshot: BatterySnapshot, modifier: Modifier = Mo
                 val startY = tankTop - 34.dp.toPx() - row * 18.dp.toPx()
                 val travel = (liquidTop - startY - 10.dp.toPx()).coerceAtLeast(24.dp.toPx())
                 val y = startY + phase * travel
-                val radius = 2.8.dp.toPx() + (1f - phase) * 3.8.dp.toPx()
+                val radiusPx = 2.8.dp.toPx() + (1f - phase) * 2.6.dp.toPx()
                 drawCircle(
                     color = dropletColor.copy(alpha = 0.28f + (1f - phase) * 0.48f),
-                    radius = radius,
+                    radius = radiusPx,
                     center = Offset(laneX, y)
                 )
             }
         }
 
         if (dischargingDropletCount > 0) {
-            val laneCount = minOf(dischargingDropletCount, 6)
+            val laneCount = dischargingDropletCount.coerceAtMost(25)
+            val laneInset = 0.12f
+            val laneWidthFraction = 1f - laneInset * 2f
             repeat(dischargingDropletCount) { index ->
                 val lane = index % laneCount
                 val row = index / laneCount
@@ -791,10 +795,10 @@ private fun BatteryTankVisual(snapshot: BatterySnapshot, modifier: Modifier = Mo
                 val endY = tankTop - 34.dp.toPx() - row * 18.dp.toPx()
                 val travel = (startY - endY).coerceAtLeast(24.dp.toPx())
                 val y = startY - phase * travel
-                val radius = 2.8.dp.toPx() + phase * 3.8.dp.toPx()
+                val radiusPx = 2.8.dp.toPx() + phase * 2.6.dp.toPx()
                 drawCircle(
                     color = dropletColor.copy(alpha = 0.24f + phase * 0.52f),
-                    radius = radius,
+                    radius = radiusPx,
                     center = Offset(laneX, y)
                 )
             }
