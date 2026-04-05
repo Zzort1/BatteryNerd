@@ -123,17 +123,20 @@ fun BatteryDreamTank(
         }
 
         if (chargingDropletCount > 0) {
-            val laneCount = minOf(chargingDropletCount, 6)
+            val laneCount = chargingDropletCount.coerceAtMost(25)
+            val laneInset = 0.12f
+            val laneWidthFraction = 1f - laneInset * 2f
             repeat(chargingDropletCount) { index ->
-                val lane = index % laneCount
-                val row = index / laneCount
-                val laneFraction = if (laneCount == 1) 0.5f else lane / (laneCount - 1f)
-                val laneX = innerLeft + innerWidth * (0.12f + laneFraction * 0.76f)
-                val phase = (dropletOffset + index * 0.11f + row * 0.17f) % 1f
-                val startY = tankTop - 34.dp.toPx() - row * 18.dp.toPx()
-                val travel = (liquidTop - startY - 10.dp.toPx()).coerceAtLeast(24.dp.toPx())
+                val lane = (pseudoRandom01(index * 53 + 17) * laneCount).toInt().coerceIn(0, laneCount - 1)
+                val laneFraction = if (laneCount == 1) 0.5f else laneInset + (lane / (laneCount - 1f)) * laneWidthFraction
+                val laneJitter = (pseudoRandom01(index * 97 + 29) - 0.5f) * (laneWidthFraction / laneCount) * 0.7f
+                val laneX = innerLeft + innerWidth * (laneFraction + laneJitter).coerceIn(0.1f, 0.9f)
+                val phase = (dropletOffset + index * 0.097f + pseudoRandom01(index * 41 + 5) * 0.33f) % 1f
+                val rowOffset = pseudoRandom01(index * 19 + 7) * 42.dp.toPx()
+                val startY = innerTop - 34.dp.toPx() - rowOffset
+                val travel = (liquidTop - startY - 8.dp.toPx()).coerceAtLeast(24.dp.toPx())
                 val y = startY + phase * travel
-                val radiusPx = 2.8.dp.toPx() + (1f - phase) * 3.8.dp.toPx()
+                val radiusPx = 2.8.dp.toPx() + (1f - phase) * 2.6.dp.toPx()
                 drawCircle(
                     color = accentColor.copy(alpha = 0.28f + (1f - phase) * 0.48f),
                     radius = radiusPx,
@@ -143,18 +146,21 @@ fun BatteryDreamTank(
         }
 
         if (dischargingDropletCount > 0) {
-            val laneCount = minOf(dischargingDropletCount, 6)
+            val laneCount = dischargingDropletCount.coerceAtMost(25)
+            val laneInset = 0.12f
+            val laneWidthFraction = 1f - laneInset * 2f
             repeat(dischargingDropletCount) { index ->
-                val lane = index % laneCount
-                val row = index / laneCount
-                val laneFraction = if (laneCount == 1) 0.5f else lane / (laneCount - 1f)
-                val laneX = innerLeft + innerWidth * (0.12f + laneFraction * 0.76f)
-                val phase = (dropletOffset + index * 0.11f + row * 0.17f) % 1f
-                val startY = (liquidTop + 12.dp.toPx() + row * 16.dp.toPx()).coerceAtMost(innerTop + innerHeight - 10.dp.toPx())
-                val endY = tankTop - 34.dp.toPx() - row * 18.dp.toPx()
+                val lane = (pseudoRandom01(index * 53 + 17) * laneCount).toInt().coerceIn(0, laneCount - 1)
+                val laneFraction = if (laneCount == 1) 0.5f else laneInset + (lane / (laneCount - 1f)) * laneWidthFraction
+                val laneJitter = (pseudoRandom01(index * 97 + 29) - 0.5f) * (laneWidthFraction / laneCount) * 0.7f
+                val laneX = innerLeft + innerWidth * (laneFraction + laneJitter).coerceIn(0.1f, 0.9f)
+                val phase = (dropletOffset + index * 0.097f + pseudoRandom01(index * 41 + 5) * 0.33f) % 1f
+                val rowOffset = pseudoRandom01(index * 19 + 7) * 42.dp.toPx()
+                val startY = (liquidTop + 10.dp.toPx() + rowOffset * 0.4f).coerceAtMost(innerTop + innerHeight - 8.dp.toPx())
+                val endY = innerTop - 34.dp.toPx() - rowOffset
                 val travel = (startY - endY).coerceAtLeast(24.dp.toPx())
                 val y = startY - phase * travel
-                val radiusPx = 2.8.dp.toPx() + phase * 3.8.dp.toPx()
+                val radiusPx = 2.8.dp.toPx() + phase * 2.6.dp.toPx()
                 drawCircle(
                     color = accentColor.copy(alpha = 0.24f + phase * 0.52f),
                     radius = radiusPx,
@@ -184,4 +190,10 @@ fun BatteryDreamTank(
         }
         drawPath(path = boltPath, color = boltColor.copy(alpha = if (snapshot.isCharging) 0.92f else 0.35f))
     }
+}
+
+private fun pseudoRandom01(seed: Int): Float {
+    var x = seed * 1103515245 + 12345
+    x = x xor (x ushr 16)
+    return ((x and 0x7fffffff) / 2147483647f).coerceIn(0f, 1f)
 }
