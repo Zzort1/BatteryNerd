@@ -80,6 +80,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.PI
+import kotlin.math.floor
 import kotlin.math.sin
 
 private enum class DashboardTab(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
@@ -759,9 +760,11 @@ private fun BatteryTankVisual(snapshot: BatterySnapshot, modifier: Modifier = Mo
             repeat(chargingDropletCount) { index ->
                 val lane = index % laneCount
                 val row = index / laneCount
-                val laneFraction = if (laneCount == 1) 0.5f else lane / (laneCount - 1f)
-                val laneX = innerLeft + innerWidth * (0.12f + laneFraction * 0.76f)
-                val phase = (dropletOffset + index * 0.11f + row * 0.17f) % 1f
+                val motion = dropletOffset + index * 0.11f + row * 0.17f
+                val cycle = floor(motion).toInt()
+                val phase = motion - floor(motion)
+                val seededLane = pseudoRandom01(seed = cycle * 131 + index * 97 + lane * 53 + 17)
+                val laneX = innerLeft + innerWidth * (0.12f + seededLane * 0.76f)
                 val startY = tankTop - 34.dp.toPx() - row * 18.dp.toPx()
                 val travel = (liquidTop - startY - 10.dp.toPx()).coerceAtLeast(24.dp.toPx())
                 val y = startY + phase * travel
@@ -779,9 +782,11 @@ private fun BatteryTankVisual(snapshot: BatterySnapshot, modifier: Modifier = Mo
             repeat(dischargingDropletCount) { index ->
                 val lane = index % laneCount
                 val row = index / laneCount
-                val laneFraction = if (laneCount == 1) 0.5f else lane / (laneCount - 1f)
-                val laneX = innerLeft + innerWidth * (0.12f + laneFraction * 0.76f)
-                val phase = (dropletOffset + index * 0.11f + row * 0.17f) % 1f
+                val motion = dropletOffset + index * 0.11f + row * 0.17f
+                val cycle = floor(motion).toInt()
+                val phase = motion - floor(motion)
+                val seededLane = pseudoRandom01(seed = cycle * 151 + index * 101 + lane * 47 + 23)
+                val laneX = innerLeft + innerWidth * (0.12f + seededLane * 0.76f)
                 val startY = (liquidTop + 12.dp.toPx() + row * 16.dp.toPx()).coerceAtMost(innerTop + innerHeight - 10.dp.toPx())
                 val endY = tankTop - 34.dp.toPx() - row * 18.dp.toPx()
                 val travel = (startY - endY).coerceAtLeast(24.dp.toPx())
@@ -1279,6 +1284,12 @@ private fun healthLabel(health: Int?): String = when (health) {
     BatteryManager.BATTERY_HEALTH_COLD -> "Cold"
     BatteryManager.BATTERY_HEALTH_UNKNOWN, null -> "Unknown"
     else -> "Health $health"
+}
+
+private fun pseudoRandom01(seed: Int): Float {
+    var x = seed * 1103515245 + 12345
+    x = x xor (x ushr 16)
+    return ((x and 0x7fffffff) / 2147483647f).coerceIn(0f, 1f)
 }
 
 @Composable
