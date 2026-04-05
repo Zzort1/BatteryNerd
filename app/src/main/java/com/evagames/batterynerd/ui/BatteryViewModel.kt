@@ -5,11 +5,37 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.evagames.batterynerd.data.BatteryRepository
 import com.evagames.batterynerd.data.BatterySnapshot
+import java.time.Duration
+import java.time.Instant
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+
+data class PowerUsageSample(
+    val capturedAt: Instant,
+    val powerW: Float,
+)
+
+data class PowerUsageRecord(
+    val id: Long,
+    val startedAt: Instant,
+    val endedAt: Instant,
+    val samples: List<PowerUsageSample>,
+    val totalEnergyMwh: Float,
+    val startRemainingEnergyMwh: Float?,
+    val startFullEnergyMwh: Float?,
+    val autoStopped: Boolean,
+)
+
+data class ActivePowerUsageRecording(
+    val startedAt: Instant,
+    val samples: List<PowerUsageSample> = emptyList(),
+    val totalEnergyMwh: Float = 0f,
+    val startRemainingEnergyMwh: Float? = null,
+    val startFullEnergyMwh: Float? = null,
+)
 
 data class BatteryUiState(
     val snapshot: BatterySnapshot? = null,
@@ -19,8 +45,14 @@ data class BatteryUiState(
     val history: List<BatterySnapshot> = emptyList(),
     val rollingAveragePowerW: Float? = null,
     val estimatedTimeRemainingMs: Long? = null,
-    val estimatedTimeToFullMs: Long? = null
-)
+    val estimatedTimeToFullMs: Long? = null,
+    val activeRecording: ActivePowerUsageRecording? = null,
+    val recordings: List<PowerUsageRecord> = emptyList(),
+    val selectedRecordingId: Long? = null,
+) {
+    val selectedRecording: PowerUsageRecord?
+        get() = recordings.firstOrNull { it.id == selectedRecordingId }
+}
 
 class BatteryViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -31,6 +63,8 @@ class BatteryViewModel(application: Application) : AndroidViewModel(application)
 
     private var observationJob: Job? = null
     private val rollingWindowMs = 60_000L
+    private val maxRecordingMs = 5 * 60_000L
+    private val recordingSampleIntervalMs = 1_000L
 
     private fun historyCapacityFor(intervalMs: Long): Int = ((rollingWindowMs / intervalMs) + 10L).toInt().coerceAtLeast(60)
 
@@ -41,6 +75,29 @@ class BatteryViewModel(application: Application) : AndroidViewModel(application)
     fun setSampleInterval(intervalMs: Long) {
         _uiState.value = _uiState.value.copy(sampleIntervalMs = intervalMs)
         startObserving()
+    }
+
+    fun startPowerUsageRecording() {
+        val snapshot = _uiState.value.snapshot ?: return
+        _uiState.value = _uiState.value.copy(
+            activeRecording = ActivePowerUsageRecording(
+                startedAt = snapshot.capturedAt,
+                startRemainingEnergyMwh = snapshot.storedEnergyMwh,
+                startFullEnergyMwh = snapshot.estimatedFullEnergyMwh,
+            ),
+            selectedRecordingId = null,
+        )
+    }
+
+    fun stopPowerUsageRecording() {
+        val state = _uiState.value
+        val active = state.activeRecording ?: return
+        val snapshot = state.snapshot ?: return
+        finalizeRecording(active, snapshot, autoStopped = false)
+    }
+
+    fun selectRecording(recordId: Long) {
+        _uiState.value = _uiState.value.copy(selectedRecordingId = recordId)
     }
 
     private fun startObserving() {
@@ -63,6 +120,20 @@ class BatteryViewModel(application: Application) : AndroidViewModel(application)
                 val estimatedTimeRemainingMs = snapshot.estimatedTimeRemainingMsForPower(rollingAveragePowerW)
                 val estimatedTimeToFullMs = snapshot.estimatedTimeToFullMsForPower(rollingAveragePowerW)
 
+                var nextActiveRecording = currentState.activeRecording?.let { updateActiveRecording(it, snapshot) }
+                var nextRecordings = currentState.recordings
+                var nextSelectedRecordingId = currentState.selectedRecordingId
+
+                if (nextActiveRecording != null) {
+                    val elapsedMs = Duration.between(nextActiveRecording.startedAt, snapshot.capturedAt).toMillis()
+                    if (elapsedMs >= maxRecordingMs) {
+                        val finalized = buildRecord(nextActiveRecording, snapshot, autoStopped = true)
+                        nextRecordings = (listOf(finalized) + currentState.recordings).take(10)
+                        nextSelectedRecordingId = finalized.id
+                        nextActiveRecording = null
+                    }
+                }
+
                 _uiState.value = currentState.copy(
                     snapshot = snapshot,
                     history = updatedHistory,
@@ -78,9 +149,69 @@ class BatteryViewModel(application: Application) : AndroidViewModel(application)
                     },
                     rollingAveragePowerW = rollingAveragePowerW,
                     estimatedTimeRemainingMs = estimatedTimeRemainingMs,
-                    estimatedTimeToFullMs = estimatedTimeToFullMs
+                    estimatedTimeToFullMs = estimatedTimeToFullMs,
+                    activeRecording = nextActiveRecording,
+                    recordings = nextRecordings,
+                    selectedRecordingId = nextSelectedRecordingId,
                 )
             }
         }
+    }
+
+    private fun updateActiveRecording(
+        active: ActivePowerUsageRecording,
+        snapshot: BatterySnapshot,
+    ): ActivePowerUsageRecording {
+        val powerW = snapshot.netPowerW ?: 0f
+        val lastSample = active.samples.lastOrNull()
+        return if (lastSample == null) {
+            active.copy(samples = listOf(PowerUsageSample(snapshot.capturedAt, powerW)))
+        } else {
+            val elapsedMs = Duration.between(lastSample.capturedAt, snapshot.capturedAt).toMillis()
+            if (elapsedMs < recordingSampleIntervalMs) {
+                active
+            } else {
+                val deltaSeconds = elapsedMs / 1000f
+                val additionalEnergyMwh = lastSample.powerW * deltaSeconds / 3.6f
+                active.copy(
+                    samples = active.samples + PowerUsageSample(snapshot.capturedAt, powerW),
+                    totalEnergyMwh = active.totalEnergyMwh + additionalEnergyMwh,
+                )
+            }
+        }
+    }
+
+    private fun finalizeRecording(
+        active: ActivePowerUsageRecording,
+        snapshot: BatterySnapshot,
+        autoStopped: Boolean,
+    ) {
+        val finalized = buildRecord(active, snapshot, autoStopped)
+        _uiState.value = _uiState.value.copy(
+            activeRecording = null,
+            recordings = (listOf(finalized) + _uiState.value.recordings).take(10),
+            selectedRecordingId = finalized.id,
+        )
+    }
+
+    private fun buildRecord(
+        active: ActivePowerUsageRecording,
+        snapshot: BatterySnapshot,
+        autoStopped: Boolean,
+    ): PowerUsageRecord {
+        val samples = when {
+            active.samples.isEmpty() -> listOf(PowerUsageSample(snapshot.capturedAt, snapshot.netPowerW ?: 0f))
+            else -> active.samples
+        }
+        return PowerUsageRecord(
+            id = active.startedAt.toEpochMilli(),
+            startedAt = active.startedAt,
+            endedAt = samples.last().capturedAt,
+            samples = samples,
+            totalEnergyMwh = active.totalEnergyMwh,
+            startRemainingEnergyMwh = active.startRemainingEnergyMwh,
+            startFullEnergyMwh = active.startFullEnergyMwh,
+            autoStopped = autoStopped,
+        )
     }
 }

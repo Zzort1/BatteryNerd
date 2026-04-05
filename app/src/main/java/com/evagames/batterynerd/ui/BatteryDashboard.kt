@@ -8,6 +8,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,7 +39,9 @@ import androidx.compose.material.icons.rounded.WaterDrop
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -82,6 +85,7 @@ import kotlin.math.sin
 private enum class DashboardTab(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     Visual("Visual", Icons.Rounded.WaterDrop),
     Home("Home", Icons.Rounded.Home),
+    Session("Session", Icons.Rounded.Memory),
     Details("Details", Icons.AutoMirrored.Rounded.List)
 }
 
@@ -118,6 +122,7 @@ fun BatteryDashboard(
                             text = when (selectedTab) {
                                 DashboardTab.Visual -> "Animated battery visual"
                                 DashboardTab.Home -> "Live battery telemetry"
+                                DashboardTab.Session -> "Power usage recorder"
                                 DashboardTab.Details -> "Detailed device readings"
                             },
                             style = MaterialTheme.typography.labelMedium,
@@ -183,11 +188,302 @@ fun BatteryDashboard(
                     onSampleIntervalChanged = viewModel::setSampleInterval,
                     padding = padding
                 )
+                DashboardTab.Session -> RecordingTab(
+                    activeRecording = uiState.activeRecording,
+                    selectedRecording = uiState.selectedRecording,
+                    recordings = uiState.recordings,
+                    onStartRecording = viewModel::startPowerUsageRecording,
+                    onStopRecording = viewModel::stopPowerUsageRecording,
+                    onSelectRecording = viewModel::selectRecording,
+                    padding = padding
+                )
                 DashboardTab.Details -> DetailsTab(
                     snapshot = snapshot,
                     estimatedTimeMs = currentEstimateMs(uiState),
                     rollingAveragePowerW = uiState.rollingAveragePowerW,
                     padding = padding
+                )
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun RecordingTab(
+    activeRecording: ActivePowerUsageRecording?,
+    selectedRecording: PowerUsageRecord?,
+    recordings: List<PowerUsageRecord>,
+    onStartRecording: () -> Unit,
+    onStopRecording: () -> Unit,
+    onSelectRecording: (Long) -> Unit,
+    padding: PaddingValues,
+) {
+    val displayRecord = selectedRecording ?: recordings.firstOrNull()
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(padding),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(16.dp)
+    ) {
+        item {
+            SessionRecorderCard(
+                activeRecording = activeRecording,
+                selectedRecording = displayRecord,
+                onStartRecording = onStartRecording,
+                onStopRecording = onStopRecording,
+            )
+        }
+        item {
+            SectionTitle("Last 10 recordings")
+        }
+        if (recordings.isEmpty()) {
+            item {
+                Card {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text("No recordings yet", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Start a session to capture one-second power samples for up to five minutes.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        } else {
+            items(recordings) { record ->
+                RecordingListItem(
+                    record = record,
+                    isSelected = selectedRecording?.id == record.id || (selectedRecording == null && recordings.firstOrNull()?.id == record.id),
+                    onClick = { onSelectRecording(record.id) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SessionRecorderCard(
+    activeRecording: ActivePowerUsageRecording?,
+    selectedRecording: PowerUsageRecord?,
+    onStartRecording: () -> Unit,
+    onStopRecording: () -> Unit,
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Power usage stopwatch", style = MaterialTheme.typography.titleLarge)
+                    Text(
+                        if (activeRecording != null) {
+                            "Recording ${formatRecordingElapsed(activeRecording)} / 5m max"
+                        } else {
+                            "Samples power every second."
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                if (activeRecording == null) {
+                    Button(onClick = onStartRecording) {
+                        Text("Start")
+                    }
+                } else {
+                    OutlinedButton(onClick = onStopRecording) {
+                        Text("Stop")
+                    }
+                }
+            }
+
+            when {
+                activeRecording != null -> {
+                    Text(
+                        text = recordingSummaryText(
+                            totalEnergyMwh = activeRecording.totalEnergyMwh,
+                            samples = activeRecording.samples.size,
+                            isLive = true,
+                            startRemainingEnergyMwh = activeRecording.startRemainingEnergyMwh,
+                            startFullEnergyMwh = activeRecording.startFullEnergyMwh,
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                    RecordingPowerChart(
+                        values = activeRecording.samples.map { it.powerW },
+                        title = "Live recording",
+                        subtitle = "One-second samples. Auto-stops at five minutes."
+                    )
+                }
+                selectedRecording != null -> {
+                    Text(
+                        text = recordingSummaryText(
+                            totalEnergyMwh = selectedRecording.totalEnergyMwh,
+                            samples = selectedRecording.samples.size,
+                            isLive = false,
+                            startRemainingEnergyMwh = selectedRecording.startRemainingEnergyMwh,
+                            startFullEnergyMwh = selectedRecording.startFullEnergyMwh,
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                    RecordingPowerChart(
+                        values = selectedRecording.samples.map { it.powerW },
+                        title = formatRecordingHeader(selectedRecording),
+                        subtitle = if (selectedRecording.autoStopped) "Auto-stopped at the five-minute cap." else "Tap a row below to load another recording."
+                    )
+                }
+                else -> {
+                    Text(
+                        "No session selected yet. Start a recording to capture the next chess game, video, or other short test.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecordingListItem(
+    record: PowerUsageRecord,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+) {
+    val containerColor = if (isSelected) {
+        MaterialTheme.colorScheme.secondaryContainer
+    } else {
+        MaterialTheme.colorScheme.surface
+    }
+    Card(colors = CardDefaults.cardColors(containerColor = containerColor)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(formatRecordingHeader(record), style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "${formatDurationShort(recordDurationMs(record))} • ${formatSignedEnergyCompact(record.totalEnergyMwh)}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                recordingUsagePercentLine(record)?.let { percentLine ->
+                    Text(
+                        percentLine,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Text(
+                text = if (isSelected) "Selected" else "View",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecordingPowerChart(
+    values: List<Float>,
+    title: String,
+    subtitle: String,
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    val chartBackground = colorScheme.surfaceVariant.copy(alpha = 0.22f)
+    val chartOutline = colorScheme.outlineVariant
+    val chartLine = colorScheme.primary
+    Card {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(200.dp)
+                    .background(
+                        color = chartBackground,
+                        shape = RoundedCornerShape(16.dp)
+                    )
+                    .padding(8.dp)
+            ) {
+                if (values.size < 2) {
+                    drawLine(
+                        color = chartOutline,
+                        start = Offset(0f, size.height / 2f),
+                        end = Offset(size.width, size.height / 2f),
+                        strokeWidth = 2.dp.toPx(),
+                        cap = StrokeCap.Round
+                    )
+                    return@Canvas
+                }
+
+                val minValue = minOf(values.minOrNull() ?: 0f, 0f)
+                val maxValue = maxOf(values.maxOrNull() ?: 0f, 0f)
+                val range = (maxValue - minValue).takeIf { it > 0f } ?: 1f
+                val zeroY = size.height - ((0f - minValue) / range) * size.height
+
+                drawLine(
+                    color = chartOutline,
+                    start = Offset(0f, zeroY),
+                    end = Offset(size.width, zeroY),
+                    strokeWidth = 1.5.dp.toPx()
+                )
+
+                val path = Path()
+                values.forEachIndexed { index, value ->
+                    val x = if (values.size == 1) 0f else index * (size.width / (values.size - 1))
+                    val y = size.height - ((value - minValue) / range) * size.height
+                    if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                }
+
+                drawPath(
+                    path = path,
+                    color = chartLine,
+                    style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+                )
+            }
+            Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "Min ${formatPower(values.minOrNull())}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "Max ${formatPower(values.maxOrNull())}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -758,7 +1054,7 @@ private fun detailRows(
     estimatedTimeMs: Long?,
     rollingAveragePowerW: Float?
 ): List<Pair<String, String>> {
-    val formatter = DateTimeFormatter.ofPattern("HH:mm:ss.SSS", Locale.US)
+    val formatter = DateTimeFormatter.ofPattern("hh:mm:ss a", Locale.US)
         .withZone(ZoneId.systemDefault())
 
     return listOf(
@@ -813,6 +1109,114 @@ private fun formatEstimateDuration(durationMs: Long?): String =
 private fun formatEnergyMwh(valueMwh: Float): String =
     String.format(Locale.US, "%.0f mWh", valueMwh)
 
+
+
+private fun recordingSummaryText(
+    totalEnergyMwh: Float,
+    samples: Int,
+    isLive: Boolean,
+    startRemainingEnergyMwh: Float?,
+    startFullEnergyMwh: Float?,
+): String {
+    val action = when {
+        totalEnergyMwh < 0f -> "Used"
+        totalEnergyMwh > 0f -> "Gained"
+        else -> "Net"
+    }
+    val prefix = if (isLive) "Live total" else "Session total"
+    val percentLine = recordingUsagePercentLine(totalEnergyMwh, startRemainingEnergyMwh, startFullEnergyMwh)
+    return buildString {
+        append("$prefix: $action ${formatAbsEnergyCompact(totalEnergyMwh)} • $samples samples")
+        if (percentLine != null) {
+            append("\n")
+            append(percentLine)
+        }
+    }
+}
+
+private fun recordingUsagePercentLine(record: PowerUsageRecord): String? =
+    recordingUsagePercentLine(
+        totalEnergyMwh = record.totalEnergyMwh,
+        startRemainingEnergyMwh = record.startRemainingEnergyMwh,
+        startFullEnergyMwh = record.startFullEnergyMwh,
+    )
+
+private fun recordingUsagePercentLine(
+    totalEnergyMwh: Float,
+    startRemainingEnergyMwh: Float?,
+    startFullEnergyMwh: Float?,
+): String? {
+    val usedMwh = (-totalEnergyMwh).coerceAtLeast(0f)
+    if (usedMwh <= 0f) return null
+
+    val ofFullPercent = startFullEnergyMwh
+        ?.takeIf { it > 0f }
+        ?.let { (usedMwh / it) * 100f }
+    val ofRemainingPercent = startRemainingEnergyMwh
+        ?.takeIf { it > 0f }
+        ?.let { (usedMwh / it) * 100f }
+
+    if (ofFullPercent == null && ofRemainingPercent == null) return null
+
+    return buildString {
+        append("Used ")
+        append(formatThreeDecimalPercent(ofFullPercent))
+        append(" of full")
+        if (ofRemainingPercent != null) {
+            append(" • ")
+            append(formatThreeDecimalPercent(ofRemainingPercent))
+            append(" of remaining at start")
+        }
+    }
+}
+
+private fun formatThreeDecimalPercent(value: Float?): String =
+    value?.let { String.format(Locale.US, "%.3f%%", it) } ?: "—"
+
+private fun formatRecordingHeader(record: PowerUsageRecord): String {
+    val formatter = DateTimeFormatter.ofPattern("MMM d, HH:mm:ss", Locale.US)
+        .withZone(ZoneId.systemDefault())
+    return formatter.format(record.startedAt)
+}
+
+private fun recordDurationMs(record: PowerUsageRecord): Long =
+    java.time.Duration.between(record.startedAt, record.endedAt).toMillis().coerceAtLeast(0L)
+
+private fun formatRecordingElapsed(activeRecording: ActivePowerUsageRecording): String {
+    val first = activeRecording.startedAt
+    val last = activeRecording.samples.lastOrNull()?.capturedAt ?: first
+    return formatDurationShort(java.time.Duration.between(first, last).toMillis())
+}
+
+private fun formatDurationShort(ms: Long): String {
+    val totalSeconds = (ms / 1000).coerceAtLeast(0L)
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return String.format(Locale.US, "%d:%02d", minutes, seconds)
+}
+
+private fun formatAbsEnergyCompact(valueMwh: Float): String {
+    val absValue = kotlin.math.abs(valueMwh)
+    return if (absValue >= 1000f) {
+        String.format(Locale.US, "%.2f Wh", absValue / 1000f)
+    } else {
+        String.format(Locale.US, "%.0f mWh", absValue)
+    }
+}
+
+private fun formatSignedEnergyCompact(valueMwh: Float): String {
+    val sign = when {
+        valueMwh < 0f -> "−"
+        valueMwh > 0f -> "+"
+        else -> ""
+    }
+    val absValue = kotlin.math.abs(valueMwh)
+    return if (absValue >= 1000f) {
+        String.format(Locale.US, "%s%.2f Wh", sign, absValue / 1000f)
+    } else {
+        String.format(Locale.US, "%s%.0f mWh", sign, absValue)
+    }
+}
 
 private fun nullable(value: String?): String = value ?: "Unsupported / unavailable"
 
