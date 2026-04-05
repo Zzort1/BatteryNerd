@@ -3,9 +3,9 @@
 
     <application
         android:allowBackup="true"
-        android:icon="@mipmap/ic_launcher"
         android:label="Battery Nerd"
-        android:roundIcon="@mipmap/ic_launcher_round"
+        android:icon="@mipmap/battery_nerd_logo"
+        android:roundIcon="@mipmap/battery_nerd_logo_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.BatteryNerd">
         <activity

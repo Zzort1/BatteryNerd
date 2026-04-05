@@ -955,11 +955,11 @@ private fun visualStatusText(snapshot: BatterySnapshot): String {
     val power = snapshot.netPowerW
     return when {
         snapshot.isCharging && power != null && power > 0 ->
-            "The tank animation is filling because the battery is currently gaining energy. More charge power makes the droplet shower denser and the surface more active."
+            "Battery is currently charging. Each Watt of power is 1 drop so faster charging visually fills faster."
         snapshot.isCharging ->
             "Power is connected, but this device is not exposing enough data to estimate the live battery-side power cleanly."
         else ->
-            "The battery is currently running on stored energy, so the droplets reverse and rise upward. Each extra negative watt adds another upward droplet."
+            "The battery is currently running on stored energy. Each extra negative watt adds another upward droplet."
     }
 }
 
