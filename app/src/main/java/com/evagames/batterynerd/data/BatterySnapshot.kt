@@ -1,6 +1,15 @@
 package com.evagames.batterynerd.data
 
 import java.time.Instant
+import kotlin.math.abs
+
+private const val MICROAMPS_PER_AMP = 1_000_000f
+private const val MILLIAMPS_PER_AMP = 1_000f
+
+enum class BatteryCurrentScale {
+    MICRO_AMPS,
+    MILLI_AMPS,
+}
 
 data class BatterySnapshot(
     val capturedAt: Instant,
@@ -25,31 +34,32 @@ data class BatterySnapshot(
     val temperatureC: Float?
         get() = temperatureDeciC?.div(10f)
 
-    /**
-     * Many devices appear to expose current values scaled as though they were µA,
-     * but the observed magnitudes line up more closely with amps after dividing by 1000.
-     */
-    val currentNowA: Float?
-        get() = currentNowUa?.div(1000f)
-
-    val currentAverageA: Float?
-        get() = currentAverageUa?.div(1000f)
+    val detectedCurrentScale: BatteryCurrentScale?
+        get() = detectCurrentScale(rawCurrent = currentNowUa, voltageMv = voltageMv, isCharging = isCharging)
 
     val voltageV: Float?
         get() = voltageMv?.div(1000f)
 
     /**
-     * Approximate net power at the battery boundary, not charger coil output.
+     * Raw device-reported current converted to amps using the detected per-device scale.
      */
+    val currentNowA: Float?
+        get() = scaleCurrentToAmps(rawCurrent = currentNowUa, currentScale = detectedCurrentScale)
+
+    val currentAverageA: Float?
+        get() = scaleCurrentToAmps(
+            rawCurrent = currentAverageUa,
+            currentScale = detectCurrentScale(rawCurrent = currentAverageUa, voltageMv = voltageMv, isCharging = isCharging)
+        )
+
     /**
-     * Display-scaled battery power. Numerically this is the same calculation as before,
-     * but surfaced as watts to match the observed device behaviour.
+     * Approximate net power at the battery boundary, derived from the detected current scale.
      */
     val netPowerW: Float?
-        get() = if (currentNowUa != null && voltageMv != null) {
-            (currentNowUa.toLong() * voltageMv.toLong()) / 1_000_000f
-        } else {
-            null
+        get() {
+            val currentA = currentNowA ?: return null
+            val volts = voltageV ?: return null
+            return currentA * volts
         }
 
     val storedEnergyMwh: Float?
@@ -82,13 +92,9 @@ data class BatterySnapshot(
             val dischargePowerW = -powerW
             if (isCharging || dischargePowerW <= 0f) return null
 
-            // Energy is stored here in mWh, while power is displayed/scaled in W.
-            // Convert mWh -> Wh before deriving hours, otherwise the estimate is 1000x too large.
             val energyWh = energyMwh / 1000f
             return ((energyWh / dischargePowerW) * 3600_000f).toLong().takeIf { it > 0L }
         }
-
-
 
     fun estimatedTimeRemainingMsForPower(powerW: Float?): Long? {
         val energyMwh = storedEnergyMwh ?: return null
@@ -109,6 +115,7 @@ data class BatterySnapshot(
         val remainingWh = remainingMwh / 1000f
         return ((remainingWh / smoothedPowerW) * 3600_000f).toLong().takeIf { it > 0L }
     }
+
     val estimatedTimeToFullMs: Long?
         get() {
             chargeTimeRemainingMs?.takeIf { it > 0L }?.let { return it }
@@ -116,8 +123,66 @@ data class BatterySnapshot(
             val powerW = netPowerW ?: return null
             if (!isCharging || powerW <= 0f || remainingMwh <= 0f) return null
 
-            // Energy is stored in mWh, so convert to Wh before dividing by watts.
             val remainingWh = remainingMwh / 1000f
             return ((remainingWh / powerW) * 3600_000f).toLong().takeIf { it > 0L }
         }
+}
+
+private fun scaleCurrentToAmps(rawCurrent: Int?, currentScale: BatteryCurrentScale?): Float? {
+    if (rawCurrent == null || currentScale == null) return null
+    return when (currentScale) {
+        BatteryCurrentScale.MICRO_AMPS -> rawCurrent / MICROAMPS_PER_AMP
+        BatteryCurrentScale.MILLI_AMPS -> rawCurrent / MILLIAMPS_PER_AMP
+    }
+}
+
+private fun detectCurrentScale(
+    rawCurrent: Int?,
+    voltageMv: Int?,
+    isCharging: Boolean,
+): BatteryCurrentScale? {
+    if (rawCurrent == null) return null
+
+    val absRaw = abs(rawCurrent)
+    if (voltageMv == null || voltageMv <= 0) {
+        return if (absRaw >= 10_000) BatteryCurrentScale.MICRO_AMPS else BatteryCurrentScale.MILLI_AMPS
+    }
+
+    val volts = voltageMv / 1000f
+    val microPowerW = abs((rawCurrent / MICROAMPS_PER_AMP) * volts)
+    val milliPowerW = abs((rawCurrent / MILLIAMPS_PER_AMP) * volts)
+
+    val microScore = plausibilityScore(microPowerW = microPowerW, isCharging = isCharging, rawMagnitude = absRaw)
+    val milliScore = plausibilityScore(microPowerW = milliPowerW, isCharging = isCharging, rawMagnitude = absRaw / 1000)
+
+    return when {
+        milliScore > microScore -> BatteryCurrentScale.MILLI_AMPS
+        microScore > milliScore -> BatteryCurrentScale.MICRO_AMPS
+        absRaw >= 10_000 -> BatteryCurrentScale.MICRO_AMPS
+        else -> BatteryCurrentScale.MILLI_AMPS
+    }
+}
+
+private fun plausibilityScore(microPowerW: Float, isCharging: Boolean, rawMagnitude: Int): Int {
+    if (microPowerW.isNaN() || microPowerW.isInfinite()) return 0
+    if (microPowerW > 120f) return 0
+    if (microPowerW > 80f) return 1
+    if (microPowerW > 45f) return 2
+
+    var score = 0
+    if (rawMagnitude >= 50) score += 1
+
+    score += when {
+        isCharging && microPowerW in 0.3f..35f -> 6
+        !isCharging && microPowerW in 0.1f..20f -> 6
+        microPowerW in 0.05f..40f -> 4
+        microPowerW in 0.005f..60f -> 2
+        else -> 0
+    }
+
+    if (microPowerW < 0.01f && rawMagnitude < 1_000) {
+        score -= 1
+    }
+
+    return score
 }

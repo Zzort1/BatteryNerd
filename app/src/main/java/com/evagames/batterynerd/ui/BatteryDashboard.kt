@@ -1105,10 +1105,11 @@ private fun detailRows(
         "Health" to healthLabel(snapshot.health),
         "Plug type" to sourceLabel(snapshot.plugType),
         "Is charging" to snapshot.isCharging.toString(),
-        "Current now (raw reported)" to nullable(snapshot.currentNowUa?.let { "$it µA" }),
-        "Current average (raw reported)" to nullable(snapshot.currentAverageUa?.let { "$it µA" }),
-        "Current now (A)" to formatCurrent(snapshot.currentNowA),
-        "Current average (A)" to formatCurrent(snapshot.currentAverageA),
+        "Current now (raw reported)" to nullable(snapshot.currentNowUa?.toString()),
+        "Current average (raw reported)" to nullable(snapshot.currentAverageUa?.toString()),
+        "Detected current scale" to nullable(snapshot.detectedCurrentScale?.name?.replace('_', ' ')),
+        "Current now (derived)" to formatCurrent(snapshot.currentNowA),
+        "Current average (derived)" to formatCurrent(snapshot.currentAverageA),
         "Voltage" to nullable(snapshot.voltageMv?.let { "$it mV" }),
         "Voltage (derived)" to formatVoltage(snapshot.voltageV),
         "Estimated net power (displayed)" to formatPower(snapshot.netPowerW),
@@ -1262,7 +1263,14 @@ private fun formatPercent(percent: Float?): String =
     percent?.let { String.format(Locale.US, "%.1f%%", it) } ?: "—"
 
 private fun formatCurrent(valueA: Float?): String =
-    valueA?.let { String.format(Locale.US, "%.3f A", it) } ?: "Unsupported / unavailable"
+    valueA?.let {
+        val absValue = kotlin.math.abs(it)
+        if (absValue < 1f) {
+            String.format(Locale.US, "%.0f mA", it * 1000f)
+        } else {
+            String.format(Locale.US, "%.3f A", it)
+        }
+    } ?: "Unsupported / unavailable"
 
 private fun formatVoltage(valueV: Float?): String =
     valueV?.let { String.format(Locale.US, "%.3f V", it) } ?: "Unsupported / unavailable"
