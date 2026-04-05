@@ -257,8 +257,8 @@ private class DreamBatteryView @JvmOverloads constructor(
         canvas.save()
         canvas.clipPath(clipPath)
         canvas.drawPath(liquidPath, liquidPaint)
-        drawDroplets(canvas, innerRect, liquidTop, s)
         canvas.restore()
+        drawDroplets(canvas, innerRect, liquidTop, s)
 
         canvas.drawRoundRect(outerRect, radius, radius, borderPaint)
         drawBolt(canvas, outerRect)
