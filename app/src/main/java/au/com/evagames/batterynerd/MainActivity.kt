@@ -1,4 +1,4 @@
-package com.evagames.batterynerd
+package au.com.evagames.batterynerd
 
 import android.app.PictureInPictureParams
 import android.content.res.Configuration
@@ -12,8 +12,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import com.evagames.batterynerd.ui.BatteryDashboard
-import com.evagames.batterynerd.ui.theme.BatteryNerdTheme
+import au.com.evagames.batterynerd.ui.BatteryDashboard
+import au.com.evagames.batterynerd.ui.theme.BatteryNerdTheme
 
 class MainActivity : ComponentActivity() {
 

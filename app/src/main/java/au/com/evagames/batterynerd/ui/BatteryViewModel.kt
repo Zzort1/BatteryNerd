@@ -1,10 +1,10 @@
-package com.evagames.batterynerd.ui
+package au.com.evagames.batterynerd.ui
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.evagames.batterynerd.data.BatteryRepository
-import com.evagames.batterynerd.data.BatterySnapshot
+import au.com.evagames.batterynerd.data.BatteryRepository
+import au.com.evagames.batterynerd.data.BatterySnapshot
 import java.time.Duration
 import java.time.Instant
 import kotlinx.coroutines.Job

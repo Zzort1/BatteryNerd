@@ -1,4 +1,4 @@
-package com.evagames.batterynerd
+package au.com.evagames.batterynerd
 
 import android.content.Context
 import android.graphics.Canvas
@@ -19,8 +19,8 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.view.setPadding
-import com.evagames.batterynerd.data.BatteryRepository
-import com.evagames.batterynerd.data.BatterySnapshot
+import au.com.evagames.batterynerd.data.BatteryRepository
+import au.com.evagames.batterynerd.data.BatterySnapshot
 import java.util.Locale
 import kotlin.math.PI
 import kotlin.math.max

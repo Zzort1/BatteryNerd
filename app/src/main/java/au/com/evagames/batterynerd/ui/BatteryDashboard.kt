@@ -1,4 +1,4 @@
-package com.evagames.batterynerd.ui
+package au.com.evagames.batterynerd.ui
 
 import android.os.BatteryManager
 import androidx.compose.animation.core.LinearEasing
@@ -75,7 +75,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.evagames.batterynerd.data.BatterySnapshot
+import au.com.evagames.batterynerd.data.BatterySnapshot
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -700,12 +700,14 @@ private fun BatteryTankVisual(snapshot: BatterySnapshot, modifier: Modifier = Mo
         val powerW = snapshot.netPowerW ?: 0f
         val positivePowerW = powerW.coerceAtLeast(0f)
         val negativePowerW = (-powerW).coerceAtLeast(0f)
-        val chargingDropletCount = if (snapshot.isCharging && positivePowerW > 0f) {
+        val energyEnteringBattery = positivePowerW > 0.05f || (snapshot.isCharging && snapshot.plugType != null && snapshot.plugType != 0)
+        val energyLeavingBattery = negativePowerW > 0.05f && !energyEnteringBattery
+        val chargingDropletCount = if (energyEnteringBattery) {
             positivePowerW.toInt().coerceIn(1, 18)
         } else {
             0
         }
-        val dischargingDropletCount = if (!snapshot.isCharging && negativePowerW > 0f) {
+        val dischargingDropletCount = if (energyLeavingBattery) {
             negativePowerW.toInt().coerceIn(1, 18)
         } else {
             0
@@ -847,7 +849,7 @@ private fun BatteryTankVisual(snapshot: BatterySnapshot, modifier: Modifier = Mo
         }
         drawPath(
             path = boltPath,
-            color = Color.White.copy(alpha = if (snapshot.isCharging) 0.92f else 0.35f)
+            color = Color.White.copy(alpha = if (energyEnteringBattery) 0.92f else 0.35f)
         )
     }
 }
@@ -1024,7 +1026,7 @@ private fun HeroCard(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SamplingSelector(selected: Long, onSelected: (Long) -> Unit) {
-    val options = listOf(500L, 1000L, 2000L)
+    val options = listOf(50L, 500L, 1000L, 2000L)
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Refresh cadence", style = MaterialTheme.typography.titleMedium)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

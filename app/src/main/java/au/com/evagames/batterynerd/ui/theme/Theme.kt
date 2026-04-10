@@ -1,4 +1,4 @@
-package com.evagames.batterynerd.ui.theme
+package au.com.evagames.batterynerd.ui.theme
 
 import android.app.Activity
 import android.os.Build

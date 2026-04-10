@@ -1,4 +1,4 @@
-package com.evagames.batterynerd.data
+package au.com.evagames.batterynerd.data
 
 import android.content.Context
 import android.content.Intent

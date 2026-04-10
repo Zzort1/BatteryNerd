@@ -1,4 +1,4 @@
-package com.evagames.batterynerd.ui
+package au.com.evagames.batterynerd.ui
 
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -21,7 +21,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.evagames.batterynerd.data.BatterySnapshot
+import au.com.evagames.batterynerd.data.BatterySnapshot
 import kotlin.math.PI
 import kotlin.math.sin
 
@@ -75,8 +75,10 @@ fun BatteryDreamTank(
         val powerW = snapshot.netPowerW ?: 0f
         val positivePowerW = powerW.coerceAtLeast(0f)
         val negativePowerW = (-powerW).coerceAtLeast(0f)
-        val chargingDropletCount = if (snapshot.isCharging && positivePowerW > 0f) positivePowerW.toInt().coerceIn(1, 18) else 0
-        val dischargingDropletCount = if (!snapshot.isCharging && negativePowerW > 0f) negativePowerW.toInt().coerceIn(1, 18) else 0
+        val energyEnteringBattery = positivePowerW > 0.05f || (snapshot.isCharging && snapshot.plugType != null && snapshot.plugType != 0)
+        val energyLeavingBattery = negativePowerW > 0.05f && !energyEnteringBattery
+        val chargingDropletCount = if (energyEnteringBattery) positivePowerW.toInt().coerceIn(1, 18) else 0
+        val dischargingDropletCount = if (energyLeavingBattery) negativePowerW.toInt().coerceIn(1, 18) else 0
 
         drawRoundRect(
             color = capColor,
@@ -188,7 +190,7 @@ fun BatteryDreamTank(
             lineTo(boltCenter.x - 18.dp.toPx(), boltCenter.y + 6.dp.toPx())
             close()
         }
-        drawPath(path = boltPath, color = boltColor.copy(alpha = if (snapshot.isCharging) 0.92f else 0.35f))
+        drawPath(path = boltPath, color = boltColor.copy(alpha = if (energyEnteringBattery) 0.92f else 0.35f))
     }
 }
 
