@@ -37,6 +37,21 @@ data class ActivePowerUsageRecording(
     val startFullEnergyMwh: Float? = null,
 )
 
+data class WirelessAlignmentSample(
+    val capturedAt: Instant,
+    val powerW: Float,
+    val temperatureC: Float?,
+    val percent: Float?,
+)
+
+data class ActiveWirelessAlignmentSession(
+    val startedAt: Instant,
+    val startTemperatureC: Float? = null,
+    val samples: List<WirelessAlignmentSample> = emptyList(),
+    val bestInstantPowerW: Float = Float.NEGATIVE_INFINITY,
+    val bestSustained5sPowerW: Float = Float.NEGATIVE_INFINITY,
+)
+
 data class BatteryUiState(
     val snapshot: BatterySnapshot? = null,
     val sampleIntervalMs: Long = 500L,
@@ -49,6 +64,7 @@ data class BatteryUiState(
     val activeRecording: ActivePowerUsageRecording? = null,
     val recordings: List<PowerUsageRecord> = emptyList(),
     val selectedRecordingId: Long? = null,
+    val activeWirelessSession: ActiveWirelessAlignmentSession? = null,
 ) {
     val selectedRecording: PowerUsageRecord?
         get() = recordings.firstOrNull { it.id == selectedRecordingId }
@@ -65,6 +81,9 @@ class BatteryViewModel(application: Application) : AndroidViewModel(application)
     private val rollingWindowMs = 60_000L
     private val maxRecordingMs = 5 * 60_000L
     private val recordingSampleIntervalMs = 1_000L
+    private val wirelessRapidIntervalMs = 100L
+    private val maxWirelessSamples = 3_000
+    private var preWirelessSampleIntervalMs: Long? = null
 
     private fun historyCapacityFor(intervalMs: Long): Int = ((rollingWindowMs / intervalMs) + 10L).toInt().coerceAtLeast(60)
 
@@ -98,6 +117,64 @@ class BatteryViewModel(application: Application) : AndroidViewModel(application)
 
     fun selectRecording(recordId: Long) {
         _uiState.value = _uiState.value.copy(selectedRecordingId = recordId)
+    }
+
+    fun startWirelessAlignment() {
+        val snapshot = _uiState.value.snapshot ?: return
+        if (preWirelessSampleIntervalMs == null) {
+            preWirelessSampleIntervalMs = _uiState.value.sampleIntervalMs
+        }
+        if (_uiState.value.sampleIntervalMs != wirelessRapidIntervalMs) {
+            _uiState.value = _uiState.value.copy(sampleIntervalMs = wirelessRapidIntervalMs)
+            startObserving()
+        }
+        _uiState.value = _uiState.value.copy(
+            activeWirelessSession = ActiveWirelessAlignmentSession(
+                startedAt = snapshot.capturedAt,
+                startTemperatureC = snapshot.temperatureC,
+                samples = listOf(
+                    WirelessAlignmentSample(
+                        capturedAt = snapshot.capturedAt,
+                        powerW = snapshot.netPowerW ?: 0f,
+                        temperatureC = snapshot.temperatureC,
+                        percent = snapshot.percent,
+                    )
+                ),
+                bestInstantPowerW = snapshot.netPowerW ?: Float.NEGATIVE_INFINITY,
+                bestSustained5sPowerW = snapshot.netPowerW ?: Float.NEGATIVE_INFINITY,
+            )
+        )
+    }
+
+    fun stopWirelessAlignment() {
+        _uiState.value = _uiState.value.copy(activeWirelessSession = null)
+        preWirelessSampleIntervalMs?.let { previous ->
+            preWirelessSampleIntervalMs = null
+            if (_uiState.value.sampleIntervalMs != previous) {
+                _uiState.value = _uiState.value.copy(sampleIntervalMs = previous)
+                startObserving()
+            }
+        }
+    }
+
+    fun resetWirelessAlignment() {
+        val snapshot = _uiState.value.snapshot ?: return
+        _uiState.value = _uiState.value.copy(
+            activeWirelessSession = ActiveWirelessAlignmentSession(
+                startedAt = snapshot.capturedAt,
+                startTemperatureC = snapshot.temperatureC,
+                samples = listOf(
+                    WirelessAlignmentSample(
+                        capturedAt = snapshot.capturedAt,
+                        powerW = snapshot.netPowerW ?: 0f,
+                        temperatureC = snapshot.temperatureC,
+                        percent = snapshot.percent,
+                    )
+                ),
+                bestInstantPowerW = snapshot.netPowerW ?: Float.NEGATIVE_INFINITY,
+                bestSustained5sPowerW = snapshot.netPowerW ?: Float.NEGATIVE_INFINITY,
+            )
+        )
     }
 
     private fun startObserving() {
@@ -134,6 +211,8 @@ class BatteryViewModel(application: Application) : AndroidViewModel(application)
                     }
                 }
 
+                val nextWirelessSession = currentState.activeWirelessSession?.let { updateWirelessSession(it, snapshot) }
+
                 _uiState.value = currentState.copy(
                     snapshot = snapshot,
                     history = updatedHistory,
@@ -153,6 +232,7 @@ class BatteryViewModel(application: Application) : AndroidViewModel(application)
                     activeRecording = nextActiveRecording,
                     recordings = nextRecordings,
                     selectedRecordingId = nextSelectedRecordingId,
+                    activeWirelessSession = nextWirelessSession,
                 )
             }
         }
@@ -179,6 +259,32 @@ class BatteryViewModel(application: Application) : AndroidViewModel(application)
                 )
             }
         }
+    }
+
+    private fun updateWirelessSession(
+        active: ActiveWirelessAlignmentSession,
+        snapshot: BatterySnapshot,
+    ): ActiveWirelessAlignmentSession {
+        val sample = WirelessAlignmentSample(
+            capturedAt = snapshot.capturedAt,
+            powerW = snapshot.netPowerW ?: 0f,
+            temperatureC = snapshot.temperatureC,
+            percent = snapshot.percent,
+        )
+        val updatedSamples = (active.samples + sample).takeLast(maxWirelessSamples)
+        val fiveSecondCutoff = snapshot.capturedAt.minusSeconds(5)
+        val fiveSecondAverage = updatedSamples
+            .filter { !it.capturedAt.isBefore(fiveSecondCutoff) }
+            .map { it.powerW }
+            .takeIf { it.isNotEmpty() }
+            ?.average()
+            ?.toFloat() ?: sample.powerW
+
+        return active.copy(
+            samples = updatedSamples,
+            bestInstantPowerW = maxOf(active.bestInstantPowerW, sample.powerW),
+            bestSustained5sPowerW = maxOf(active.bestSustained5sPowerW, fiveSecondAverage),
+        )
     }
 
     private fun finalizeRecording(

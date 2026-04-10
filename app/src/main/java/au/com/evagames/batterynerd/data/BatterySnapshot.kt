@@ -34,8 +34,16 @@ data class BatterySnapshot(
     val temperatureC: Float?
         get() = temperatureDeciC?.div(10f)
 
+    val isEffectivelyCharging: Boolean
+        get() = when {
+            status == android.os.BatteryManager.BATTERY_STATUS_CHARGING -> true
+            status == android.os.BatteryManager.BATTERY_STATUS_FULL && (plugType ?: 0) != 0 -> true
+            isCharging && (plugType ?: 0) != 0 -> true
+            else -> false
+        }
+
     val detectedCurrentScale: BatteryCurrentScale?
-        get() = detectCurrentScale(rawCurrent = currentNowUa, voltageMv = voltageMv, isCharging = isCharging)
+        get() = detectCurrentScale(rawCurrent = currentNowUa, voltageMv = voltageMv, isCharging = isEffectivelyCharging)
 
     val voltageV: Float?
         get() = voltageMv?.div(1000f)
@@ -49,7 +57,7 @@ data class BatterySnapshot(
     val currentAverageA: Float?
         get() = scaleCurrentToAmps(
             rawCurrent = currentAverageUa,
-            currentScale = detectCurrentScale(rawCurrent = currentAverageUa, voltageMv = voltageMv, isCharging = isCharging)
+            currentScale = detectCurrentScale(rawCurrent = currentAverageUa, voltageMv = voltageMv, isCharging = isEffectivelyCharging)
         )
 
     /**
@@ -90,7 +98,7 @@ data class BatterySnapshot(
             val energyMwh = storedEnergyMwh ?: return null
             val powerW = netPowerW ?: return null
             val dischargePowerW = -powerW
-            if (isCharging || dischargePowerW <= 0f) return null
+            if (isEffectivelyCharging || dischargePowerW <= 0f) return null
 
             val energyWh = energyMwh / 1000f
             return ((energyWh / dischargePowerW) * 3600_000f).toLong().takeIf { it > 0L }
@@ -100,7 +108,7 @@ data class BatterySnapshot(
         val energyMwh = storedEnergyMwh ?: return null
         val smoothedPowerW = powerW ?: return null
         val dischargePowerW = -smoothedPowerW
-        if (isCharging || dischargePowerW <= 0f) return null
+        if (isEffectivelyCharging || dischargePowerW <= 0f) return null
 
         val energyWh = energyMwh / 1000f
         return ((energyWh / dischargePowerW) * 3600_000f).toLong().takeIf { it > 0L }
@@ -110,7 +118,7 @@ data class BatterySnapshot(
         chargeTimeRemainingMs?.takeIf { it > 0L }?.let { return it }
         val remainingMwh = energyToFullMwh ?: return null
         val smoothedPowerW = powerW ?: return null
-        if (!isCharging || smoothedPowerW <= 0f || remainingMwh <= 0f) return null
+        if (!isEffectivelyCharging || smoothedPowerW <= 0f || remainingMwh <= 0f) return null
 
         val remainingWh = remainingMwh / 1000f
         return ((remainingWh / smoothedPowerW) * 3600_000f).toLong().takeIf { it > 0L }
@@ -121,7 +129,7 @@ data class BatterySnapshot(
             chargeTimeRemainingMs?.takeIf { it > 0L }?.let { return it }
             val remainingMwh = energyToFullMwh ?: return null
             val powerW = netPowerW ?: return null
-            if (!isCharging || powerW <= 0f || remainingMwh <= 0f) return null
+            if (!isEffectivelyCharging || powerW <= 0f || remainingMwh <= 0f) return null
 
             val remainingWh = remainingMwh / 1000f
             return ((remainingWh / powerW) * 3600_000f).toLong().takeIf { it > 0L }

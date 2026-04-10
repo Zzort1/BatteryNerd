@@ -87,6 +87,7 @@ private enum class DashboardTab(val label: String, val icon: androidx.compose.ui
     Visual("Visual", Icons.Rounded.WaterDrop),
     Home("Home", Icons.Rounded.Home),
     Session("Session", Icons.Rounded.Memory),
+    Wireless("Wireless", Icons.Rounded.Bolt),
     Details("Details", Icons.AutoMirrored.Rounded.List)
 }
 
@@ -124,6 +125,7 @@ fun BatteryDashboard(
                                 DashboardTab.Visual -> "Animated battery visual"
                                 DashboardTab.Home -> "Live battery telemetry"
                                 DashboardTab.Session -> "Power usage recorder"
+                                DashboardTab.Wireless -> "Wireless charge optimiser"
                                 DashboardTab.Details -> "Detailed device readings"
                             },
                             style = MaterialTheme.typography.labelMedium,
@@ -198,10 +200,17 @@ fun BatteryDashboard(
                     onSelectRecording = viewModel::selectRecording,
                     padding = padding
                 )
+                DashboardTab.Wireless -> WirelessTab(
+                    snapshot = snapshot,
+                    activeSession = uiState.activeWirelessSession,
+                    onStart = viewModel::startWirelessAlignment,
+                    onStop = viewModel::stopWirelessAlignment,
+                    onReset = viewModel::resetWirelessAlignment,
+                    estimatedTimeMs = currentEstimateMs(uiState),
+                    padding = padding
+                )
                 DashboardTab.Details -> DetailsTab(
                     snapshot = snapshot,
-                    estimatedTimeMs = currentEstimateMs(uiState),
-                    rollingAveragePowerW = uiState.rollingAveragePowerW,
                     padding = padding
                 )
             }
@@ -477,12 +486,12 @@ private fun RecordingPowerChart(
             }
             Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = "Min ${formatPower(values.minOrNull())}",
+                    text = values.minOrNull()?.let { "Min ${formatPower(it)}" } ?: "Min —",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = "Max ${formatPower(values.maxOrNull())}",
+                    text = values.maxOrNull()?.let { "Max ${formatPower(it)}" } ?: "Max —",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -544,8 +553,6 @@ private fun HomeTab(
 @Composable
 private fun DetailsTab(
     snapshot: BatterySnapshot,
-    estimatedTimeMs: Long?,
-    rollingAveragePowerW: Float?,
     padding: PaddingValues
 ) {
     LazyColumn(
@@ -558,7 +565,7 @@ private fun DetailsTab(
         item {
             SectionTitle("Raw and derived telemetry")
         }
-        items(detailRows(snapshot, estimatedTimeMs, rollingAveragePowerW)) { row ->
+        items(detailRows(snapshot)) { row ->
             MetricRow(label = row.first, value = row.second)
         }
     }
@@ -609,6 +616,134 @@ private fun VisualTab(
 }
 
 @Composable
+private fun WirelessTab(
+    snapshot: BatterySnapshot,
+    activeSession: ActiveWirelessAlignmentSession?,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+    onReset: () -> Unit,
+    estimatedTimeMs: Long?,
+    padding: PaddingValues,
+) {
+    val isWireless = snapshot.plugType == BatteryManager.BATTERY_PLUGGED_WIRELESS
+    val samples = activeSession?.samples ?: emptyList()
+    val livePower = snapshot.netPowerW
+    val avg5s = averagePowerSince(samples, snapshot.capturedAt.minusSeconds(5))
+    val avg10s = averagePowerSince(samples, snapshot.capturedAt.minusSeconds(10))
+    val sessionMin = samples.minOfOrNull { it.powerW }
+    val sessionMax = samples.maxOfOrNull { it.powerW }
+    val bestInstant = activeSession?.bestInstantPowerW?.takeIf { it.isFinite() }
+    val bestSustained = activeSession?.bestSustained5sPowerW?.takeIf { it.isFinite() }
+    val startTemperatureC = activeSession?.startTemperatureC
+    val currentTemperatureC = snapshot.temperatureC
+    val tempRise = if (startTemperatureC != null && currentTemperatureC != null) {
+        currentTemperatureC - startTemperatureC
+    } else {
+        null
+    }
+    val stability = stabilityLabel(samples, snapshot.capturedAt)
+    val trend = trendLabel(samples, snapshot.capturedAt)
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(padding),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(16.dp)
+    ) {
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Text("Wireless charge optimiser", style = MaterialTheme.typography.titleLarge)
+                    Text(
+                        if (activeSession != null) "Rapid 100 ms polling active. Move the phone slowly and watch the averages." else "Start a rapid polling session to find the strongest wireless charging position.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (!isWireless) {
+                        Text(
+                            "Wireless charging is not currently detected. Place the phone on a wireless pad, then start or continue the alignment session.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        MiniStat(label = "Power", value = formatPrecisePower(livePower))
+                        MiniStat(label = "5s avg", value = formatPrecisePower(avg5s))
+                        MiniStat(label = "Best", value = formatPrecisePower(bestInstant))
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        MiniStat(label = "Best 5s", value = formatPrecisePower(bestSustained))
+                        MiniStat(label = "Trend", value = trend)
+                        MiniStat(label = "Stability", value = stability)
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        MiniStat(label = "10s avg", value = formatPrecisePower(avg10s))
+                        MiniStat(label = "Temp", value = formatTemperature(snapshot.temperatureC))
+                        MiniStat(label = "ΔTemp", value = formatTemperatureDelta(tempRise))
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        MiniStat(label = "Battery", value = formatPercent(snapshot.percent))
+                        MiniStat(label = "Source", value = sourceLabel(snapshot.plugType))
+                        MiniStat(label = estimateMiniLabel(snapshot), value = formatEstimateDuration(estimatedTimeMs))
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Button(onClick = onStart, enabled = activeSession == null) { Text("Start") }
+                        OutlinedButton(onClick = onStop, enabled = activeSession != null) { Text("Stop") }
+                        OutlinedButton(onClick = onReset, enabled = activeSession != null) { Text("Reset") }
+                    }
+                }
+            }
+        }
+        item {
+            Card {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("Alignment session chart", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Shows rapid wireless power samples. Higher, steadier power usually means better alignment.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+        item {
+            RecordingPowerChart(
+                values = samples.map { it.powerW },
+                title = "Wireless placement power",
+                subtitle = "Current ${formatPrecisePower(livePower)} • Min ${formatPrecisePower(sessionMin)} • Max ${formatPrecisePower(sessionMax)}"
+            )
+        }
+    }
+}
+
+@Composable
 private fun PipMonitor(snapshot: BatterySnapshot) {
     val pipBackground = Color(0xFF090B13)
     val primaryText = Color(0xFFF5F7FF)
@@ -638,7 +773,7 @@ private fun PipMonitor(snapshot: BatterySnapshot) {
                 textAlign = TextAlign.Center
             )
             Text(
-                text = if (snapshot.isCharging) "Charging" else "On battery",
+                text = if (isEffectivelyCharging(snapshot)) "Charging" else "On battery",
                 style = MaterialTheme.typography.labelMedium,
                 color = secondaryText,
                 maxLines = 1,
@@ -1003,7 +1138,7 @@ private fun HeroCard(
                     Icon(Icons.Rounded.BatteryChargingFull, contentDescription = null)
                 })
                 AssistChip(onClick = {}, label = { Text(sourceLabel(snapshot.plugType)) })
-                AssistChip(onClick = {}, label = { Text(statusLabel(snapshot.status, snapshot.isCharging)) })
+                AssistChip(onClick = {}, label = { Text(statusLabel(snapshot.status, isEffectivelyCharging(snapshot))) })
             }
             Text(
                 text = estimateHeadline(snapshot, estimatedTimeMs),
@@ -1089,44 +1224,28 @@ private fun MetricRow(label: String, value: String) {
     }
 }
 
-private fun detailRows(
-    snapshot: BatterySnapshot,
-    estimatedTimeMs: Long?,
-    rollingAveragePowerW: Float?
-): List<Pair<String, String>> {
-    val formatter = DateTimeFormatter.ofPattern("hh:mm:ss a", Locale.US)
-        .withZone(ZoneId.systemDefault())
-
+private fun detailRows(snapshot: BatterySnapshot): List<Pair<String, String>> {
     return listOf(
-        "Captured at" to formatter.format(snapshot.capturedAt),
         "Battery level (intent)" to nullable(snapshot.level?.toString()),
         "Battery scale" to nullable(snapshot.scale?.toString()),
         "Battery percent (derived)" to formatPercent(snapshot.percent),
         "BatteryManager capacity" to nullable(snapshot.capacityPercent?.let { "$it %" }),
-        "Status" to statusLabel(snapshot.status, snapshot.isCharging),
+        "Status" to statusLabel(snapshot.status, isEffectivelyCharging(snapshot)),
         "Health" to healthLabel(snapshot.health),
         "Plug type" to sourceLabel(snapshot.plugType),
-        "Is charging" to snapshot.isCharging.toString(),
-        "Current now (raw reported)" to nullable(snapshot.currentNowUa?.toString()),
-        "Current average (raw reported)" to nullable(snapshot.currentAverageUa?.toString()),
+        "Current now (raw reported)" to nullable(snapshot.currentNowUa?.let { "$it raw" }),
+        "Current average (raw reported)" to nullable(snapshot.currentAverageUa?.let { "$it raw" }),
         "Detected current scale" to nullable(snapshot.detectedCurrentScale?.name?.replace('_', ' ')),
-        "Current now (derived)" to formatCurrent(snapshot.currentNowA),
-        "Current average (derived)" to formatCurrent(snapshot.currentAverageA),
+        "Current now" to formatCurrent(snapshot.currentNowA),
+        "Current average" to formatCurrent(snapshot.currentAverageA),
         "Voltage" to nullable(snapshot.voltageMv?.let { "$it mV" }),
         "Voltage (derived)" to formatVoltage(snapshot.voltageV),
-        "Estimated net power (displayed)" to formatPower(snapshot.netPowerW),
+        "Net power" to formatPower(snapshot.netPowerW),
         "Charge counter" to nullable(snapshot.chargeCounterUah?.let { "$it µAh" }),
-        "Energy counter" to nullable(snapshot.energyCounterNwh?.let { "$it nWh" }),
         "Stored energy (derived)" to nullable(snapshot.storedEnergyMwh?.let { formatEnergyMwh(it) }),
         "Estimated full energy" to nullable(snapshot.estimatedFullEnergyMwh?.let { formatEnergyMwh(it) }),
         "Energy remaining to full" to nullable(snapshot.energyToFullMwh?.let { formatEnergyMwh(it) }),
         "Charge time remaining (system API)" to nullable(snapshot.chargeTimeRemainingMs?.let { formatDuration(it) }),
-        "Instant estimate from current watts" to nullable(
-            (if (snapshot.isCharging) snapshot.estimatedTimeToFullMs else snapshot.estimatedTimeRemainingMs)
-                ?.let { formatDuration(it) }
-        ),
-        "Rolling average power (last minute)" to formatPower(rollingAveragePowerW),
-        "Smoothed estimate" to nullable(estimatedTimeMs?.let { formatDuration(it) }),
         "Temperature" to nullable(snapshot.temperatureDeciC?.let { "$it deci-°C" }),
         "Temperature (derived)" to formatTemperature(snapshot.temperatureC),
         "Technology" to nullable(snapshot.technology),
@@ -1134,12 +1253,11 @@ private fun detailRows(
     )
 }
 
-
 private fun estimateMiniLabel(snapshot: BatterySnapshot): String =
-    if (snapshot.isCharging) "To full" else "Remaining"
+    if (isEffectivelyCharging(snapshot)) "To full" else "Remaining"
 
 private fun estimateHeadline(snapshot: BatterySnapshot, estimatedTimeMs: Long?): String = when {
-    snapshot.isCharging -> "Estimated time to full: ${formatEstimateDuration(estimatedTimeMs)}"
+    isEffectivelyCharging(snapshot) -> "Estimated time to full: ${formatEstimateDuration(estimatedTimeMs)}"
     else -> "Estimated battery life left: ${formatEstimateDuration(estimatedTimeMs)}"
 }
 
@@ -1309,6 +1427,13 @@ private fun statusLabel(status: Int?, isCharging: Boolean): String = when (statu
     else -> "Status $status"
 }
 
+private fun isEffectivelyCharging(snapshot: BatterySnapshot): Boolean = when {
+    snapshot.status == BatteryManager.BATTERY_STATUS_CHARGING -> true
+    snapshot.status == BatteryManager.BATTERY_STATUS_FULL && (snapshot.plugType ?: 0) != 0 -> true
+    (snapshot.plugType ?: 0) != 0 && (snapshot.netPowerW ?: 0f) > 0f -> true
+    else -> false
+}
+
 private fun sourceLabel(source: Int?): String = when (source) {
     BatteryManager.BATTERY_PLUGGED_USB -> "USB"
     BatteryManager.BATTERY_PLUGGED_AC -> "AC"
@@ -1335,6 +1460,47 @@ private fun pseudoRandom01(seed: Int): Float {
     return ((x and 0x7fffffff) / 2147483647f).coerceIn(0f, 1f)
 }
 
+private fun averagePowerSince(samples: List<WirelessAlignmentSample>, since: java.time.Instant): Float? =
+    samples.filter { !it.capturedAt.isBefore(since) }
+        .map { it.powerW }
+        .takeIf { it.isNotEmpty() }
+        ?.average()
+        ?.toFloat()
+
+private fun stabilityLabel(samples: List<WirelessAlignmentSample>, now: java.time.Instant): String {
+    val recent = samples.filter { !it.capturedAt.isBefore(now.minusSeconds(5)) }.map { it.powerW }
+    if (recent.size < 3) return "—"
+    val mean = recent.average().toFloat()
+    val variance = recent.map { (it - mean) * (it - mean) }.average().toFloat()
+    val stdDev = kotlin.math.sqrt(variance)
+    return when {
+        stdDev < 0.12f -> "Very stable"
+        stdDev < 0.3f -> "Stable"
+        stdDev < 0.7f -> "Moderate"
+        else -> "Fluctuating"
+    }
+}
+
+private fun trendLabel(samples: List<WirelessAlignmentSample>, now: java.time.Instant): String {
+    val recent = samples.filter { !it.capturedAt.isBefore(now.minusMillis(1200)) }
+    if (recent.size < 4) return "→ Stable"
+    val split = recent.size / 2
+    val older = recent.take(split).map { it.powerW }.average().toFloat()
+    val newer = recent.drop(split).map { it.powerW }.average().toFloat()
+    val delta = newer - older
+    return when {
+        delta > 0.15f -> "↑ Better"
+        delta < -0.15f -> "↓ Worse"
+        else -> "→ Stable"
+    }
+}
+
+private fun formatPrecisePower(powerW: Float?): String =
+    powerW?.let { String.format(Locale.US, "%.3f W", it) } ?: "—"
+
+private fun formatTemperatureDelta(deltaC: Float?): String =
+    deltaC?.let { String.format(Locale.US, "%+.1f °C", it) } ?: "—"
+
 @Composable
 private fun SectionTitle(title: String) {
     Text(title, style = MaterialTheme.typography.titleLarge)
@@ -1342,4 +1508,4 @@ private fun SectionTitle(title: String) {
 
 
 private fun currentEstimateMs(uiState: BatteryUiState): Long? =
-    if (uiState.snapshot?.isCharging == true) uiState.estimatedTimeToFullMs else uiState.estimatedTimeRemainingMs
+    if (uiState.snapshot?.let(::isEffectivelyCharging) == true) uiState.estimatedTimeToFullMs else uiState.estimatedTimeRemainingMs

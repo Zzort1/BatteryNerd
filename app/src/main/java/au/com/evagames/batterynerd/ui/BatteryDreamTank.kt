@@ -49,9 +49,9 @@ fun BatteryDreamTank(
     )
     val dropletOffset by infiniteTransition.animateFloat(
         initialValue = 0f,
-        targetValue = 1f,
+        targetValue = 1000f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1050, easing = LinearEasing),
+            animation = tween(durationMillis = 1_050_000, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
         label = "droplet_offset"
