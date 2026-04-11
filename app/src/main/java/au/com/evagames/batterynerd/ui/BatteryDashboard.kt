@@ -30,12 +30,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.List
 import androidx.compose.material.icons.rounded.BatteryChargingFull
+import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.OpenInFull
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Thermostat
 import androidx.compose.material.icons.rounded.WaterDrop
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -44,6 +46,7 @@ import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -53,6 +56,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -95,6 +99,13 @@ private enum class DashboardTab(val label: String, val icon: androidx.compose.ui
 }
 
 private enum class SessionSubTab { Stopwatch, Benchmarks }
+
+private sealed interface PendingSessionDialog {
+    data class DeleteRecording(val id: Long) : PendingSessionDialog
+    data class DeleteBenchmark(val id: Long) : PendingSessionDialog
+    data object ClearRecordings : PendingSessionDialog
+    data object ClearBenchmarks : PendingSessionDialog
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -207,10 +218,14 @@ fun BatteryDashboard(
                     onStartRecording = viewModel::startPowerUsageRecording,
                     onStopRecording = viewModel::stopPowerUsageRecording,
                     onSelectRecording = viewModel::selectRecording,
+                    onDeleteRecording = viewModel::deleteRecording,
+                    onClearRecordings = viewModel::clearRecordings,
                     onBenchmarkDraftNameChanged = viewModel::setBenchmarkDraftName,
                     onStartBenchmark = viewModel::startChargerBenchmark,
                     onStopBenchmark = viewModel::stopChargerBenchmark,
                     onSelectBenchmark = viewModel::selectBenchmark,
+                    onDeleteBenchmark = viewModel::deleteBenchmark,
+                    onClearBenchmarks = viewModel::clearBenchmarks,
                     padding = padding
                 )
                 DashboardTab.Wireless -> WirelessTab(
@@ -244,15 +259,65 @@ private fun RecordingTab(
     onStartRecording: () -> Unit,
     onStopRecording: () -> Unit,
     onSelectRecording: (Long) -> Unit,
+    onDeleteRecording: (Long) -> Unit,
+    onClearRecordings: () -> Unit,
     onBenchmarkDraftNameChanged: (String) -> Unit,
     onStartBenchmark: () -> Unit,
     onStopBenchmark: () -> Unit,
     onSelectBenchmark: (Long) -> Unit,
+    onDeleteBenchmark: (Long) -> Unit,
+    onClearBenchmarks: () -> Unit,
     padding: PaddingValues,
 ) {
     var selectedSubTab by remember { mutableStateOf(SessionSubTab.Stopwatch) }
+    var pendingDialog by remember { mutableStateOf<PendingSessionDialog?>(null) }
     val displayRecord = selectedRecording ?: recordings.firstOrNull()
     val displayBenchmark = selectedBenchmark ?: benchmarks.firstOrNull()
+
+    pendingDialog?.let { dialog ->
+        when (dialog) {
+            is PendingSessionDialog.DeleteRecording -> ConfirmDeleteDialog(
+                title = "Delete recording?",
+                body = "This saved power usage recording will be removed from local storage.",
+                confirmLabel = "Delete",
+                onConfirm = {
+                    onDeleteRecording(dialog.id)
+                    pendingDialog = null
+                },
+                onDismiss = { pendingDialog = null }
+            )
+            is PendingSessionDialog.DeleteBenchmark -> ConfirmDeleteDialog(
+                title = "Delete benchmark?",
+                body = "This saved charger benchmark will be removed from local storage.",
+                confirmLabel = "Delete",
+                onConfirm = {
+                    onDeleteBenchmark(dialog.id)
+                    pendingDialog = null
+                },
+                onDismiss = { pendingDialog = null }
+            )
+            PendingSessionDialog.ClearRecordings -> ConfirmDeleteDialog(
+                title = "Clear all recordings?",
+                body = "All saved stopwatch recordings will be removed from local storage.",
+                confirmLabel = "Clear all",
+                onConfirm = {
+                    onClearRecordings()
+                    pendingDialog = null
+                },
+                onDismiss = { pendingDialog = null }
+            )
+            PendingSessionDialog.ClearBenchmarks -> ConfirmDeleteDialog(
+                title = "Clear all benchmarks?",
+                body = "All saved charger benchmarks will be removed from local storage.",
+                confirmLabel = "Clear all",
+                onConfirm = {
+                    onClearBenchmarks()
+                    pendingDialog = null
+                },
+                onDismiss = { pendingDialog = null }
+            )
+        }
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -287,7 +352,12 @@ private fun RecordingTab(
                     )
                 }
                 item {
-                    SectionTitle("Saved session recordings")
+                    SectionHeaderWithAction(
+                        title = "Saved session recordings",
+                        actionLabel = "Clear all",
+                        showAction = recordings.isNotEmpty(),
+                        onAction = { pendingDialog = PendingSessionDialog.ClearRecordings },
+                    )
                 }
                 if (recordings.isEmpty()) {
                     item {
@@ -301,7 +371,8 @@ private fun RecordingTab(
                         RecordingListItem(
                             record = record,
                             isSelected = selectedRecording?.id == record.id || (selectedRecording == null && recordings.firstOrNull()?.id == record.id),
-                            onClick = { onSelectRecording(record.id) }
+                            onClick = { onSelectRecording(record.id) },
+                            onDelete = { pendingDialog = PendingSessionDialog.DeleteRecording(record.id) },
                         )
                     }
                 }
@@ -318,7 +389,12 @@ private fun RecordingTab(
                     )
                 }
                 item {
-                    SectionTitle("Saved charger benchmarks")
+                    SectionHeaderWithAction(
+                        title = "Saved charger benchmarks",
+                        actionLabel = "Clear all",
+                        showAction = benchmarks.isNotEmpty(),
+                        onAction = { pendingDialog = PendingSessionDialog.ClearBenchmarks },
+                    )
                 }
                 if (benchmarks.isEmpty()) {
                     item {
@@ -332,10 +408,32 @@ private fun RecordingTab(
                         BenchmarkListItem(
                             benchmark = benchmark,
                             isSelected = selectedBenchmark?.id == benchmark.id || (selectedBenchmark == null && benchmarks.firstOrNull()?.id == benchmark.id),
-                            onClick = { onSelectBenchmark(benchmark.id) }
+                            onClick = { onSelectBenchmark(benchmark.id) },
+                            onDelete = { pendingDialog = PendingSessionDialog.DeleteBenchmark(benchmark.id) },
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionHeaderWithAction(
+    title: String,
+    actionLabel: String,
+    showAction: Boolean,
+    onAction: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SectionTitle(title)
+        if (showAction) {
+            TextButton(onClick = onAction) {
+                Text(actionLabel)
             }
         }
     }
@@ -424,7 +522,7 @@ private fun SessionRecorderCard(
                         fontWeight = FontWeight.Medium
                     )
 
-                    RecordingPowerChart(
+                     RecordingPowerChart(
                         values = activeRecording.samples.map { it.powerW },
                         title = "Live recording",
                         subtitle = "One-second samples. Auto-stops at five minutes."
@@ -576,6 +674,7 @@ private fun BenchmarkListItem(
     benchmark: ChargerBenchmarkRecord,
     isSelected: Boolean,
     onClick: () -> Unit,
+    onDelete: () -> Unit,
 ) {
     val containerColor = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface
     Card(colors = CardDefaults.cardColors(containerColor = containerColor)) {
@@ -584,10 +683,13 @@ private fun BenchmarkListItem(
                 .fillMaxWidth()
                 .clickable(onClick = onClick)
                 .padding(horizontal = 16.dp, vertical = 14.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth(0.82f)) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.weight(1f)
+            ) {
                 Text(benchmark.name, style = MaterialTheme.typography.titleMedium)
                 Text(
                     "${formatRecordingHeader(benchmark.startedAt)} • Peak ${formatPrecisePower(benchmark.peakPowerW)} • 30s ${formatPrecisePower(benchmark.average30sPowerW)}",
@@ -600,12 +702,22 @@ private fun BenchmarkListItem(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Spacer(modifier = Modifier.width(12.dp))
-            Text(
-                text = if (isSelected) "Selected" else "View",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary
-            )
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = if (isSelected) "Selected" else "Tap to view",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                IconButton(onClick = onDelete) {
+                    Icon(
+                        imageVector = Icons.Rounded.DeleteOutline,
+                        contentDescription = "Delete benchmark"
+                    )
+                }
+            }
         }
     }
 }
@@ -615,6 +727,7 @@ private fun RecordingListItem(
     record: PowerUsageRecord,
     isSelected: Boolean,
     onClick: () -> Unit,
+    onDelete: () -> Unit,
 ) {
     val containerColor = if (isSelected) {
         MaterialTheme.colorScheme.secondaryContainer
@@ -627,10 +740,13 @@ private fun RecordingListItem(
                 .fillMaxWidth()
                 .clickable(onClick = onClick)
                 .padding(horizontal = 16.dp, vertical = 14.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.weight(1f)
+            ) {
                 Text(formatRecordingHeader(record), style = MaterialTheme.typography.titleMedium)
                 Text(
                     "${formatDurationShort(recordDurationMs(record))} • ${formatSignedEnergyCompact(record.totalEnergyMwh)}",
@@ -645,100 +761,49 @@ private fun RecordingListItem(
                     )
                 }
             }
-            Text(
-                text = if (isSelected) "Selected" else "View",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary
-            )
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = if (isSelected) "Selected" else "Tap to view",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                IconButton(onClick = onDelete) {
+                    Icon(
+                        imageVector = Icons.Rounded.DeleteOutline,
+                        contentDescription = "Delete recording"
+                    )
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun RecordingPowerChart(
-    values: List<Float>,
+private fun ConfirmDeleteDialog(
     title: String,
-    subtitle: String,
+    body: String,
+    confirmLabel: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
 ) {
-    val colorScheme = MaterialTheme.colorScheme
-    val chartBackground = colorScheme.surfaceVariant.copy(alpha = 0.22f)
-    val chartOutline = colorScheme.outlineVariant
-    val chartLine = colorScheme.primary
-    Card {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Canvas(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(200.dp)
-                    .background(
-                        color = chartBackground,
-                        shape = RoundedCornerShape(16.dp)
-                    )
-                    .padding(8.dp)
-            ) {
-                if (values.size < 2) {
-                    drawLine(
-                        color = chartOutline,
-                        start = Offset(0f, size.height / 2f),
-                        end = Offset(size.width, size.height / 2f),
-                        strokeWidth = 2.dp.toPx(),
-                        cap = StrokeCap.Round
-                    )
-                    return@Canvas
-                }
-
-                val minValue = minOf(values.minOrNull() ?: 0f, 0f)
-                val maxValue = maxOf(values.maxOrNull() ?: 0f, 0f)
-                val range = (maxValue - minValue).takeIf { it > 0f } ?: 1f
-                val zeroY = size.height - ((0f - minValue) / range) * size.height
-
-                drawLine(
-                    color = chartOutline,
-                    start = Offset(0f, zeroY),
-                    end = Offset(size.width, zeroY),
-                    strokeWidth = 1.5.dp.toPx()
-                )
-
-                val path = Path()
-                values.forEachIndexed { index, value ->
-                    val x = if (values.size == 1) 0f else index * (size.width / (values.size - 1))
-                    val y = size.height - ((value - minValue) / range) * size.height
-                    if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
-                }
-
-                drawPath(
-                    path = path,
-                    color = chartLine,
-                    style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
-                )
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = { Text(body) },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(confirmLabel)
             }
-            if (values.size >= 2) {
-                Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = values.minOrNull()?.let { "Min ${formatPower(it)}" } ?: "Min —",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = values.maxOrNull()?.let { "Max ${formatPower(it)}" } ?: "Max —",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
             }
         }
-    }
+    )
 }
 
 @Composable
@@ -1238,6 +1303,96 @@ private fun pseudoRandomInt(seed: Int, bound: Int): Int {
 }
 
 @Composable
+private fun RecordingPowerChart(
+    values: List<Float>,
+    title: String,
+    subtitle: String,
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    val chartBackground = colorScheme.surfaceVariant.copy(alpha = 0.22f)
+    val chartOutline = colorScheme.outlineVariant
+    val chartLine = colorScheme.primary
+    Card {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(200.dp)
+                    .background(
+                        color = chartBackground,
+                        shape = RoundedCornerShape(16.dp)
+                    )
+                    .padding(8.dp)
+            ) {
+                if (values.size < 2) {
+                    drawLine(
+                        color = chartOutline,
+                        start = Offset(0f, size.height / 2f),
+                        end = Offset(size.width, size.height / 2f),
+                        strokeWidth = 2.dp.toPx(),
+                        cap = StrokeCap.Round
+                    )
+                    return@Canvas
+                }
+
+                val minValue = minOf(values.minOrNull() ?: 0f, 0f)
+                val maxValue = maxOf(values.maxOrNull() ?: 0f, 0f)
+                val range = (maxValue - minValue).takeIf { it > 0f } ?: 1f
+                val zeroY = size.height - ((0f - minValue) / range) * size.height
+
+                drawLine(
+                    color = chartOutline,
+                    start = Offset(0f, zeroY),
+                    end = Offset(size.width, zeroY),
+                    strokeWidth = 1.5.dp.toPx()
+                )
+
+                val path = Path()
+                values.forEachIndexed { index, value ->
+                    val x = if (values.size == 1) 0f else index * (size.width / (values.size - 1))
+                    val y = size.height - ((value - minValue) / range) * size.height
+                    if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                }
+
+                drawPath(
+                    path = path,
+                    color = chartLine,
+                    style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+                )
+            }
+            if (values.size >= 2) {
+                Row(
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = values.minOrNull()?.let { "Min ${formatPower(it)}" } ?: "Min —",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = values.maxOrNull()?.let { "Max ${formatPower(it)}" } ?: "Max —",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun LivePowerChart(history: List<BatterySnapshot>) {
     val colorScheme = MaterialTheme.colorScheme
     val chartBackground = colorScheme.surfaceVariant.copy(alpha = 0.22f)
@@ -1398,7 +1553,7 @@ private fun HeroCard(
                 style = MaterialTheme.typography.bodyMedium
             )
             Text(
-                text = "Estimate uses the last minute average: ${formatPower(rollingAveragePowerW)}",
+                text = "Estimate uses the last 5 seconds average: ${formatPower(rollingAveragePowerW)}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -1493,7 +1648,7 @@ private fun detailRows(snapshot: BatterySnapshot): List<Pair<String, String>> {
         "Stored energy (derived)" to nullable(snapshot.storedEnergyMwh?.let { formatEnergyMwh(it) }),
         "Estimated full energy" to nullable(snapshot.estimatedFullEnergyMwh?.let { formatEnergyMwh(it) }),
         "Energy remaining to full" to nullable(snapshot.energyToFullMwh?.let { formatEnergyMwh(it) }),
-        "Charge time remaining (system API)" to nullable(snapshot.chargeTimeRemainingMs?.let { formatDuration(it) }),
+        "Charge time remaining" to nullable(snapshot.chargeTimeRemainingMs?.let { formatDuration(it) }),
         "Temperature" to nullable(snapshot.temperatureDeciC?.let { "$it deci-°C" }),
         "Temperature (derived)" to formatTemperature(snapshot.temperatureC),
         "Technology" to nullable(snapshot.technology),

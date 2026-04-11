@@ -119,7 +119,8 @@ class BatteryViewModel(application: Application) : AndroidViewModel(application)
     val uiState: StateFlow<BatteryUiState> = _uiState.asStateFlow()
 
     private var observationJob: Job? = null
-    private val rollingWindowMs = 60_000L
+    private val historyWindowMs = 60_000L
+    private val estimateWindowMs = 5_000L
     private val maxRecordingMs = 5 * 60_000L
     private val recordingSampleIntervalMs = 1_000L
     private val wirelessRapidIntervalMs = 100L
@@ -128,7 +129,7 @@ class BatteryViewModel(application: Application) : AndroidViewModel(application)
     private val benchmarkDurationMs = 60_000L
     private var preWirelessSampleIntervalMs: Long? = null
 
-    private fun historyCapacityFor(intervalMs: Long): Int = ((rollingWindowMs / intervalMs) + 10L).toInt().coerceAtLeast(60)
+    private fun historyCapacityFor(intervalMs: Long): Int = ((historyWindowMs / intervalMs) + 10L).toInt().coerceAtLeast(60)
 
     init {
         val loadedRecordings = loadRecordings()
@@ -170,6 +171,25 @@ class BatteryViewModel(application: Application) : AndroidViewModel(application)
         _uiState.value = _uiState.value.copy(selectedRecordingId = recordId)
     }
 
+    fun deleteRecording(recordId: Long) {
+        val updated = _uiState.value.recordings.filterNot { it.id == recordId }
+        saveRecordings(updated)
+        _uiState.value = _uiState.value.copy(
+            recordings = updated,
+            selectedRecordingId = _uiState.value.selectedRecordingId
+                ?.takeIf { id -> updated.any { it.id == id } }
+                ?: updated.firstOrNull()?.id,
+        )
+    }
+
+    fun clearRecordings() {
+        saveRecordings(emptyList())
+        _uiState.value = _uiState.value.copy(
+            recordings = emptyList(),
+            selectedRecordingId = null,
+        )
+    }
+
     fun setBenchmarkDraftName(name: String) {
         _uiState.value = _uiState.value.copy(benchmarkDraftName = name)
     }
@@ -201,6 +221,26 @@ class BatteryViewModel(application: Application) : AndroidViewModel(application)
 
     fun selectBenchmark(benchmarkId: Long) {
         _uiState.value = _uiState.value.copy(selectedBenchmarkId = benchmarkId)
+    }
+
+
+    fun deleteBenchmark(benchmarkId: Long) {
+        val updated = _uiState.value.benchmarks.filterNot { it.id == benchmarkId }
+        saveBenchmarks(updated)
+        _uiState.value = _uiState.value.copy(
+            benchmarks = updated,
+            selectedBenchmarkId = _uiState.value.selectedBenchmarkId
+                ?.takeIf { id -> updated.any { it.id == id } }
+                ?: updated.firstOrNull()?.id,
+        )
+    }
+
+    fun clearBenchmarks() {
+        saveBenchmarks(emptyList())
+        _uiState.value = _uiState.value.copy(
+            benchmarks = emptyList(),
+            selectedBenchmarkId = null,
+        )
     }
 
     fun startWirelessAlignment() {
@@ -271,7 +311,7 @@ class BatteryViewModel(application: Application) : AndroidViewModel(application)
                 val power = snapshot.netPowerW
                 val historyCapacity = historyCapacityFor(currentState.sampleIntervalMs)
                 val updatedHistory = (currentState.history + snapshot).takeLast(historyCapacity)
-                val windowStart = snapshot.capturedAt.minusMillis(rollingWindowMs)
+                val windowStart = snapshot.capturedAt.minusMillis(estimateWindowMs)
                 val rollingSamples = updatedHistory.filter { !it.capturedAt.isBefore(windowStart) }
                 val rollingAveragePowerW = rollingSamples
                     .mapNotNull { it.netPowerW }
