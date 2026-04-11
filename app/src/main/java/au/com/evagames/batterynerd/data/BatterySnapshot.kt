@@ -124,6 +124,15 @@ data class BatterySnapshot(
         return ((remainingWh / smoothedPowerW) * 3600_000f).toLong().takeIf { it > 0L }
     }
 
+
+
+    fun percentPerHourForPower(powerW: Float?): Float? {
+        val fullEnergyMwh = estimatedFullEnergyMwh ?: return null
+        val effectivePowerW = powerW ?: return null
+        if (fullEnergyMwh <= 0f || effectivePowerW == 0f) return null
+        val fullEnergyWh = fullEnergyMwh / 1000f
+        return (effectivePowerW / fullEnergyWh) * 100f
+    }
     val estimatedTimeToFullMs: Long?
         get() {
             chargeTimeRemainingMs?.takeIf { it > 0L }?.let { return it }

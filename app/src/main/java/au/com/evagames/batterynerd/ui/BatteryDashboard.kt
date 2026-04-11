@@ -49,6 +49,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -76,6 +77,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import au.com.evagames.batterynerd.data.BatterySnapshot
+import java.time.Duration
+import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -90,6 +93,8 @@ private enum class DashboardTab(val label: String, val icon: androidx.compose.ui
     Wireless("Wireless", Icons.Rounded.Bolt),
     Details("Details", Icons.AutoMirrored.Rounded.List)
 }
+
+private enum class SessionSubTab { Stopwatch, Benchmarks }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -124,7 +129,7 @@ fun BatteryDashboard(
                             text = when (selectedTab) {
                                 DashboardTab.Visual -> "Animated battery visual"
                                 DashboardTab.Home -> "Live battery telemetry"
-                                DashboardTab.Session -> "Power usage recorder"
+                                DashboardTab.Session -> "Power sessions and charger benchmarks"
                                 DashboardTab.Wireless -> "Wireless charge optimiser"
                                 DashboardTab.Details -> "Detailed device readings"
                             },
@@ -195,9 +200,17 @@ fun BatteryDashboard(
                     activeRecording = uiState.activeRecording,
                     selectedRecording = uiState.selectedRecording,
                     recordings = uiState.recordings,
+                    benchmarkDraftName = uiState.benchmarkDraftName,
+                    activeBenchmark = uiState.activeBenchmark,
+                    selectedBenchmark = uiState.selectedBenchmark,
+                    benchmarks = uiState.benchmarks,
                     onStartRecording = viewModel::startPowerUsageRecording,
                     onStopRecording = viewModel::stopPowerUsageRecording,
                     onSelectRecording = viewModel::selectRecording,
+                    onBenchmarkDraftNameChanged = viewModel::setBenchmarkDraftName,
+                    onStartBenchmark = viewModel::startChargerBenchmark,
+                    onStopBenchmark = viewModel::stopChargerBenchmark,
+                    onSelectBenchmark = viewModel::selectBenchmark,
                     padding = padding
                 )
                 DashboardTab.Wireless -> WirelessTab(
@@ -224,12 +237,23 @@ private fun RecordingTab(
     activeRecording: ActivePowerUsageRecording?,
     selectedRecording: PowerUsageRecord?,
     recordings: List<PowerUsageRecord>,
+    benchmarkDraftName: String,
+    activeBenchmark: ActiveChargerBenchmarkSession?,
+    selectedBenchmark: ChargerBenchmarkRecord?,
+    benchmarks: List<ChargerBenchmarkRecord>,
     onStartRecording: () -> Unit,
     onStopRecording: () -> Unit,
     onSelectRecording: (Long) -> Unit,
+    onBenchmarkDraftNameChanged: (String) -> Unit,
+    onStartBenchmark: () -> Unit,
+    onStopBenchmark: () -> Unit,
+    onSelectBenchmark: (Long) -> Unit,
     padding: PaddingValues,
 ) {
+    var selectedSubTab by remember { mutableStateOf(SessionSubTab.Stopwatch) }
     val displayRecord = selectedRecording ?: recordings.firstOrNull()
+    val displayBenchmark = selectedBenchmark ?: benchmarks.firstOrNull()
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -238,42 +262,100 @@ private fun RecordingTab(
         contentPadding = PaddingValues(16.dp)
     ) {
         item {
-            SessionRecorderCard(
-                activeRecording = activeRecording,
-                selectedRecording = displayRecord,
-                onStartRecording = onStartRecording,
-                onStopRecording = onStopRecording,
-            )
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = selectedSubTab == SessionSubTab.Stopwatch,
+                    onClick = { selectedSubTab = SessionSubTab.Stopwatch },
+                    label = { Text("Stopwatch") }
+                )
+                FilterChip(
+                    selected = selectedSubTab == SessionSubTab.Benchmarks,
+                    onClick = { selectedSubTab = SessionSubTab.Benchmarks },
+                    label = { Text("Benchmarks") }
+                )
+            }
         }
-        item {
-            SectionTitle("Last 10 recordings")
-        }
-        if (recordings.isEmpty()) {
-            item {
-                Card {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text("No recordings yet", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            "Start a session to capture one-second power samples for up to five minutes.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+
+        when (selectedSubTab) {
+            SessionSubTab.Stopwatch -> {
+                item {
+                    SessionRecorderCard(
+                        activeRecording = activeRecording,
+                        selectedRecording = displayRecord,
+                        onStartRecording = onStartRecording,
+                        onStopRecording = onStopRecording,
+                    )
+                }
+                item {
+                    SectionTitle("Saved session recordings")
+                }
+                if (recordings.isEmpty()) {
+                    item {
+                        EmptyStorageCard(
+                            title = "No recordings yet",
+                            body = "Recorded sessions are stored locally on this device after you stop them."
+                        )
+                    }
+                } else {
+                    items(recordings) { record ->
+                        RecordingListItem(
+                            record = record,
+                            isSelected = selectedRecording?.id == record.id || (selectedRecording == null && recordings.firstOrNull()?.id == record.id),
+                            onClick = { onSelectRecording(record.id) }
                         )
                     }
                 }
             }
-        } else {
-            items(recordings) { record ->
-                RecordingListItem(
-                    record = record,
-                    isSelected = selectedRecording?.id == record.id || (selectedRecording == null && recordings.firstOrNull()?.id == record.id),
-                    onClick = { onSelectRecording(record.id) }
-                )
+            SessionSubTab.Benchmarks -> {
+                item {
+                    ChargerBenchmarkCard(
+                        draftName = benchmarkDraftName,
+                        activeBenchmark = activeBenchmark,
+                        selectedBenchmark = displayBenchmark,
+                        onBenchmarkDraftNameChanged = onBenchmarkDraftNameChanged,
+                        onStartBenchmark = onStartBenchmark,
+                        onStopBenchmark = onStopBenchmark,
+                    )
+                }
+                item {
+                    SectionTitle("Saved charger benchmarks")
+                }
+                if (benchmarks.isEmpty()) {
+                    item {
+                        EmptyStorageCard(
+                            title = "No charger benchmarks yet",
+                            body = "Benchmarks are stored locally after each 60 second run so you can compare chargers and cables later."
+                        )
+                    }
+                } else {
+                    items(benchmarks) { benchmark ->
+                        BenchmarkListItem(
+                            benchmark = benchmark,
+                            isSelected = selectedBenchmark?.id == benchmark.id || (selectedBenchmark == null && benchmarks.firstOrNull()?.id == benchmark.id),
+                            onClick = { onSelectBenchmark(benchmark.id) }
+                        )
+                    }
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun EmptyStorageCard(title: String, body: String) {
+    Card {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(
+                body,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -297,20 +379,26 @@ private fun SessionRecorderCard(
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.Top
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
                     Text("Power usage stopwatch", style = MaterialTheme.typography.titleLarge)
                     Text(
                         if (activeRecording != null) {
                             "Recording ${formatRecordingElapsed(activeRecording)} / 5m max"
                         } else {
-                            "Samples power every second."
+                            "Samples power every second. Saved locally on this device."
                         },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+
+                Spacer(modifier = Modifier.width(12.dp))
+
                 if (activeRecording == null) {
                     Button(onClick = onStartRecording) {
                         Text("Start")
@@ -335,12 +423,14 @@ private fun SessionRecorderCard(
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium
                     )
+
                     RecordingPowerChart(
                         values = activeRecording.samples.map { it.powerW },
                         title = "Live recording",
                         subtitle = "One-second samples. Auto-stops at five minutes."
                     )
                 }
+
                 selectedRecording != null -> {
                     Text(
                         text = recordingSummaryText(
@@ -353,12 +443,18 @@ private fun SessionRecorderCard(
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium
                     )
+
                     RecordingPowerChart(
                         values = selectedRecording.samples.map { it.powerW },
                         title = formatRecordingHeader(selectedRecording),
-                        subtitle = if (selectedRecording.autoStopped) "Auto-stopped at the five-minute cap." else "Tap a row below to load another recording."
+                        subtitle = if (selectedRecording.autoStopped) {
+                            "Auto-stopped at the five-minute cap."
+                        } else {
+                            "Tap a row below to load another recording."
+                        }
                     )
                 }
+
                 else -> {
                     Text(
                         "No session selected yet. Start a recording to capture the next chess game, video, or other short test.",
@@ -367,6 +463,149 @@ private fun SessionRecorderCard(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ChargerBenchmarkCard(
+    draftName: String,
+    activeBenchmark: ActiveChargerBenchmarkSession?,
+    selectedBenchmark: ChargerBenchmarkRecord?,
+    onBenchmarkDraftNameChanged: (String) -> Unit,
+    onStartBenchmark: () -> Unit,
+    onStopBenchmark: () -> Unit,
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text("Charger benchmark", style = MaterialTheme.typography.titleLarge)
+            Text(
+                if (activeBenchmark != null) {
+                    "Running ${formatBenchmarkElapsed(activeBenchmark)} / 1:00. Keep the charger and cable steady."
+                } else {
+                    "Name the charger or cable, then run a one-minute benchmark. Results are stored locally for later comparison."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            OutlinedTextField(
+                value = draftName,
+                onValueChange = onBenchmarkDraftNameChanged,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Benchmark name") },
+                placeholder = { Text("Anker 25W + USB-C cable") },
+                enabled = activeBenchmark == null,
+                singleLine = true,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(onClick = onStartBenchmark, enabled = activeBenchmark == null) {
+                    Text("Start")
+                }
+                OutlinedButton(onClick = onStopBenchmark, enabled = activeBenchmark != null) {
+                    Text("Stop")
+                }
+            }
+
+            when {
+                activeBenchmark != null -> {
+                    BenchmarkSummary(activeBenchmark.toPreviewRecord())
+                    RecordingPowerChart(
+                        values = activeBenchmark.samples.map { it.powerW },
+                        title = "Live benchmark: ${activeBenchmark.name}",
+                        subtitle = "Benchmarking current charger performance over a one-minute window."
+                    )
+                }
+                selectedBenchmark != null -> {
+                    BenchmarkSummary(selectedBenchmark)
+                    RecordingPowerChart(
+                        values = selectedBenchmark.samples.map { it.powerW },
+                        title = selectedBenchmark.name,
+                        subtitle = "Tap a row below to load another saved benchmark."
+                    )
+                }
+                else -> {
+                    Text(
+                        "No benchmark selected yet. Run a benchmark to compare peak power, sustained averages, stability, and taper time.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BenchmarkSummary(benchmark: ChargerBenchmarkRecord) {
+    val tempDelta = if (benchmark.startTemperatureC != null && benchmark.endTemperatureC != null) {
+        benchmark.endTemperatureC - benchmark.startTemperatureC
+    } else {
+        null
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = benchmark.name,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold
+        )
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            AssistChip(onClick = {}, label = { Text("Peak ${formatPrecisePower(benchmark.peakPowerW)}") })
+            AssistChip(onClick = {}, label = { Text("10s ${formatPrecisePower(benchmark.average10sPowerW)}") })
+            AssistChip(onClick = {}, label = { Text("30s ${formatPrecisePower(benchmark.average30sPowerW)}") })
+            AssistChip(onClick = {}, label = { Text("${benchmarkQualityLabel(benchmark)}") })
+            AssistChip(onClick = {}, label = { Text(benchmark.sourceLabel) })
+        }
+        Text(
+            text = "Stability ${formatStdDev(benchmark.stabilityStdDevW)} • Taper ${formatBenchmarkTaper(benchmark.timeToTaperMs)} • Battery ${formatPercent(benchmark.startPercent)} → ${formatPercent(benchmark.endPercent)} • ΔTemp ${formatTemperatureDelta(tempDelta)}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun BenchmarkListItem(
+    benchmark: ChargerBenchmarkRecord,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+) {
+    val containerColor = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface
+    Card(colors = CardDefaults.cardColors(containerColor = containerColor)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth(0.82f)) {
+                Text(benchmark.name, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "${formatRecordingHeader(benchmark.startedAt)} • Peak ${formatPrecisePower(benchmark.peakPowerW)} • 30s ${formatPrecisePower(benchmark.average30sPowerW)}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    "Stability ${formatStdDev(benchmark.stabilityStdDevW)} • ${benchmark.sourceLabel}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(
+                text = if (isSelected) "Selected" else "View",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary
+            )
         }
     }
 }
@@ -484,17 +723,19 @@ private fun RecordingPowerChart(
                     style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
                 )
             }
-            Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    text = values.minOrNull()?.let { "Min ${formatPower(it)}" } ?: "Min —",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = values.maxOrNull()?.let { "Max ${formatPower(it)}" } ?: "Max —",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            if (values.size >= 2) {
+                Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = values.minOrNull()?.let { "Min ${formatPower(it)}" } ?: "Min —",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = values.maxOrNull()?.let { "Max ${formatPower(it)}" } ?: "Max —",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
     }
@@ -1145,6 +1386,13 @@ private fun HeroCard(
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium
             )
+            percentRateHeadline(snapshot, rollingAveragePowerW)?.let { rateHeadline ->
+                Text(
+                    text = rateHeadline,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             Text(
                 text = "Observed window: min ${formatPower(minObservedPowerW)} • max ${formatPower(maxObservedPowerW)}",
                 style = MaterialTheme.typography.bodyMedium
@@ -1262,6 +1510,20 @@ private fun estimateHeadline(snapshot: BatterySnapshot, estimatedTimeMs: Long?):
 }
 
 
+private fun percentRateHeadline(snapshot: BatterySnapshot, rollingAveragePowerW: Float?): String? {
+    val percentPerHour = snapshot.percentPerHourForPower(rollingAveragePowerW) ?: return null
+    val absRate = kotlin.math.abs(percentPerHour)
+    return if (percentPerHour >= 0f) {
+        "Charging at ${formatPercentRate(absRate)}"
+    } else {
+        "Draining at ${formatPercentRate(absRate)}"
+    }
+}
+
+private fun formatPercentRate(percentPerHour: Float): String =
+    String.format(Locale.US, "%.1f%%/hr", percentPerHour)
+
+
 private fun formatEstimateDuration(durationMs: Long?): String =
     durationMs?.let { formatDuration(it) } ?: "Estimating…"
 
@@ -1332,10 +1594,12 @@ private fun recordingUsagePercentLine(
 private fun formatThreeDecimalPercent(value: Float?): String =
     value?.let { String.format(Locale.US, "%.3f%%", it) } ?: "—"
 
-private fun formatRecordingHeader(record: PowerUsageRecord): String {
+private fun formatRecordingHeader(record: PowerUsageRecord): String = formatRecordingHeader(record.startedAt)
+
+private fun formatRecordingHeader(startedAt: Instant): String {
     val formatter = DateTimeFormatter.ofPattern("MMM d, HH:mm:ss", Locale.US)
         .withZone(ZoneId.systemDefault())
-    return formatter.format(record.startedAt)
+    return formatter.format(startedAt)
 }
 
 private fun recordDurationMs(record: PowerUsageRecord): Long =
@@ -1375,6 +1639,58 @@ private fun formatSignedEnergyCompact(valueMwh: Float): String {
     } else {
         String.format(Locale.US, "%s%.0f mWh", sign, absValue)
     }
+}
+
+private fun benchmarkQualityLabel(benchmark: ChargerBenchmarkRecord): String {
+    val avg30 = benchmark.average30sPowerW
+    val stdDev = benchmark.stabilityStdDevW
+    return when {
+        avg30 >= 12f && stdDev < 0.6f -> "Excellent"
+        avg30 >= 8f && stdDev < 1.0f -> "Good"
+        avg30 >= 4f -> "Fair"
+        else -> "Weak"
+    }
+}
+
+private fun formatBenchmarkTaper(timeToTaperMs: Long?): String =
+    timeToTaperMs?.let { formatDurationShort(it) } ?: "No taper"
+
+private fun formatStdDev(stdDevW: Float): String =
+    String.format(Locale.US, "±%.2f W", stdDevW)
+
+private fun formatBenchmarkElapsed(activeBenchmark: ActiveChargerBenchmarkSession): String {
+    val first = activeBenchmark.startedAt
+    val last = activeBenchmark.samples.lastOrNull()?.capturedAt ?: first
+    return formatDurationShort(Duration.between(first, last).toMillis())
+}
+
+private fun ActiveChargerBenchmarkSession.toPreviewRecord(): ChargerBenchmarkRecord {
+    val previewSamples = if (samples.isEmpty()) emptyList() else samples
+    val peakPowerW = previewSamples.maxOfOrNull { it.powerW } ?: 0f
+    val endAt = previewSamples.lastOrNull()?.capturedAt ?: startedAt
+    val average10sPowerW = previewSamples.filter { !it.capturedAt.isBefore(endAt.minusSeconds(10)) }.map { it.powerW }.takeIf { it.isNotEmpty() }?.average()?.toFloat() ?: 0f
+    val average30sPowerW = previewSamples.filter { !it.capturedAt.isBefore(endAt.minusSeconds(30)) }.map { it.powerW }.takeIf { it.isNotEmpty() }?.average()?.toFloat() ?: 0f
+    val mean = previewSamples.map { it.powerW }.takeIf { it.isNotEmpty() }?.average()?.toFloat() ?: 0f
+    val stability = if (previewSamples.size < 2) 0f else kotlin.math.sqrt(previewSamples.map { (it.powerW - mean) * (it.powerW - mean) }.average().toFloat())
+    val threshold = peakPowerW * 0.9f
+    val timeToTaper = if (peakPowerW <= 0f) null else previewSamples.firstOrNull { it.powerW < threshold }?.let { Duration.between(startedAt, it.capturedAt).toMillis() }
+    return ChargerBenchmarkRecord(
+        id = startedAt.toEpochMilli(),
+        name = name,
+        startedAt = startedAt,
+        endedAt = endAt,
+        samples = previewSamples,
+        peakPowerW = peakPowerW,
+        average10sPowerW = average10sPowerW,
+        average30sPowerW = average30sPowerW,
+        stabilityStdDevW = stability,
+        timeToTaperMs = timeToTaper,
+        startPercent = startPercent,
+        endPercent = null,
+        startTemperatureC = startTemperatureC,
+        endTemperatureC = null,
+        sourceLabel = sourceLabel,
+    )
 }
 
 private fun nullable(value: String?): String = value ?: "Unsupported / unavailable"
